@@ -6,8 +6,8 @@ from rich.live import Live
 import time
 import sys
 console = Console()
-# Theme Colors (from Claude Code style)
-ACCENT_COLOR = "#D97757"  # Orange
+ACCENT_COLOR = "#D97757"  
+ACCENT_COLOR = "white"  
 MUTED_COLOR = "gray50"
 SUCCESS_COLOR = "green"
 ERROR_COLOR = "red"
