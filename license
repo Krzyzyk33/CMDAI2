@@ -1,0 +1,7 @@
+Copyright (c) 2026 Krzyzyk33
+
+Permission is granted to use this software for personal and non-commercial purposes.
+Modification, redistribution, sublicensing, publishing, or commercial use of this software
+is prohibited without written permission from the author.
+
+All Rights Reserved.
