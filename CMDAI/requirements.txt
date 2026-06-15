@@ -1,0 +1,4 @@
+llama-cpp-python
+prompt_toolkit
+rich
+websockets
