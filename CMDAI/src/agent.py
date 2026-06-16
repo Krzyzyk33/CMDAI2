@@ -1,372 +1,382 @@
 import os
+import glob
 import json
 from .llama import LlamaModel
 from .context import ContextManager
-from .ui import print_user_msg, print_agent_msg, print_tool_call, print_tool_result, print_diff, print_code_panel, ThinkingTree, console
-from .tools import TOOLS_DEFINITIONS, execute_tool
-
-class Agent:
-    def __init__(self, model: LlamaModel, context: ContextManager):
-        self.model = model
-        self.context = context
-        self.max_iterations = 25
-        
-    def get_tool_desc(self) -> str:
-        desc = ""
-        for t in TOOLS_DEFINITIONS:
-            f = t["function"]
-            desc += f"- {f['name']}: {f['description']}\n"
-        return desc
-        
-    def handle_user_input(self, user_msg: str, mode: str, input_handler):
-        import time
-        from .ui import print_turn_done
-        
-        self.context.add_user_message(user_msg)
-        
-        turn_start = time.time()
-        total_tools = 0
-        iteration = 0
-        while iteration < self.max_iterations:
-            iteration += 1
-            tree = ThinkingTree(expanded=input_handler.thinking_expanded)
-            tree.start()
+from .agent import Agent
+from .ui import print_header, print_user_msg, console
+from .input import InputHandler
+from .ide import IDEServer
+STATE_FILE = os.path.expanduser("~/.cmdai2/state.json")
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
+def save_state(state):
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
+def get_default_model():
+    state = load_state()
+    model_type = state.get("model_type", "local")
+    
+    if model_type == "api":
+        active_model = state.get("active_api_model")
+        if active_model:
+            return "api", active_model
             
-            level_info = input_handler.thinking_levels[input_handler.thinking_idx]
-            level_idx = input_handler.thinking_idx
-            
-            if level_idx == 0:
-                thinking_desc = "You MUST wrap your thoughts inside <think> and </think> tags.\nTHINKING BEHAVIOR - LOW:\nNie generuj sekcji THINK. Przejdź od razu do ACTION lub odpowiedzi tekstowej.\nWyjątek: jeśli zadanie wymaga wyboru pliku/funkcji do edycji i nie jest to oczywiste z promptu użytkownika, napisz tylko:\n<think>\nROZUMIEM: <czego dotyczy zadanie>\nPLAN: <1 linia>\n</think>\n\nPo wykonaniu akcji NIE generuj THINK, niezależnie od wyniku.\nWyjątek: jeśli Bash zwrócił błąd, napisz 1 linię diagnozy w <think> i natychmiast zaproponuj poprawkę w kolejnym ACTION.\nNie wykonuj dodatkowych akcji 'na zapas' (build, search) jeśli użytkownik o to nie prosił."
-            elif level_idx == 1:
-                thinking_desc = "You MUST wrap your thoughts inside <think> and </think> tags.\nTHINKING BEHAVIOR - MEDIUM:\nNa początku tury wygeneruj zwięzły THINK dokładnie wewnątrz tagów <think> i </think>:\n<think>\nROZUMIEM: <czego dotyczy zadanie>\nPLAN: <krótka lista kroków (max 3)>\n</think>\n\nNie generuj sub-drzew.\nPo wykonaniu akcji odczytu (Read/Search) NIE generuj THINK, chyba że wynik drastycznie różni się od oczekiwań.\nPo akcjach modyfikujących (Edit/Write/Bash) możesz wygenerować krótki THINK (1-2 linie), jeśli wymaga tego aktualizacja planu.\n\nWymuszone akcje: Wyszukaj wszystkich callerów po zmianie sygnatury funkcji (ACTION: Search). Nie wykonuj budowania projektu (build), dopóki użytkownik o to nie poprosi."
-            elif level_idx == 2:
-                thinking_desc = "You MUST wrap your thoughts inside <think> and </think> tags.\nTHINKING BEHAVIOR - HIGH:\nNa początku tury wygeneruj ustrukturyzowany THINK dokładnie wewnątrz tagów <think> i </think>:\n<think>\nROZUMIEM: <czego dotyczy zadanie>\nOPCJE: <opcja A> | <opcja B> (tylko dla złożonych lub niejednoznacznych problemów)\nWYBOR: <wybrana opcja + krótkie uzasadnienie>\nPLAN: <ponumerowana lista kroków>\n</think>\n\nStosuj sub-drzewa (wcięte listy) tylko w przypadku istotnych decyzji architektonicznych.\nPo kluczowych akcjach wygeneruj krótki THINK potwierdzający status:\n<think>\nPOTWIERDZENIE: <status + następny krok>\n</think>\n\nWymuszone akcje: ZAWSZE wyszukaj callerów po zmianie sygnatury funkcji. Po zakończeniu bloku powiązanych ze sobą edycji kodu - ZAWSZE uruchom build."
-            elif level_idx == 3:
-                thinking_desc = "You MUST wrap your thoughts inside <think> and </think> tags.\nTHINKING BEHAVIOR - ULTRA:\nNa początku KAŻDEJ tury wygeneruj THINK dokładnie wewnątrz tagów <think> i </think>:\n<think>\nROZUMIEM: <czego dotyczy zadanie>\nKONTEKST: <co już wiesz z dotychczasowych akcji>\nOPCJE: <opcja A> | <opcja B>\nWYBOR: <wybrana opcja + uzasadnienie>\nRYZYKO: <potencjalny problem + mitygacja>\nPLAN: <ponumerowana lista kroków>\n\nDla KAŻDEGO punktu PLAN, który ma więcej niż jeden sposób wykonania, rozpisz sub-drzewo:\n  - <punkt planu>\n    > opcja 1\n    > opcja 2\n    > wybór + uzasadnienie\n</think>\n\nPo KAŻDEJ akcji wygeneruj nowy THINK:\n<think>\nPOTWIERDZENIE: <czy wynik zgodny z oczekiwaniem? co dalej?>\n</think>\n\nWymuszone akcje: ZAWSZE wyszukaj callerów po zmianie sygnatury. ZAWSZE uruchom build po edycji kodu."
-            elif level_idx == 4:
-                thinking_desc = "You MUST wrap your thoughts inside <think> and </think> tags.\nTHINKING BEHAVIOR - EXTREME:\nNa początku KAŻDEJ tury przeanalizuj cały projekt. Wygeneruj wyczerpujący THINK dokładnie wewnątrz tagów <think> i </think>:\n<think>\nROZUMIEM: <czego dotyczy zadanie w skali całego projektu>\nKONTEKST: <wnioski z logów, struktury plików i architektury>\nOPCJE: <rozbudowana lista opcji i ścieżek>\nWYBOR: <ostateczny wybór + wpływ na inne moduły>\nRYZYKO: <szczegółowa lista przypadków brzegowych, security i performance>\nPLAN: <bardzo szczegółowa lista kroków>\n\nDla KAŻDEGO punktu PLAN musisz rozpisać wielopoziomowe sub-drzewo. W pierwszej iteracji MUSISZ użyć narzędzia 'submit_plan'.\n</think>\n\nPo KAŻDEJ akcji wykonaj głęboką ewaluację:\n<think>\nEWALUACJA: <szczegółowa analiza zwróconego wyniku, diagnoza błędów, poprawki do planu>\n</think>\n\nWymuszone akcje: ZAWSZE wyszukaj wszystkie zależności. ZAWSZE uruchom build i testy jednostkowe po KAŻDEJ edycji pliku. Na końcu wykonaj procedurę re-walidacji."
-
-            messages = self.context.get_messages(self.get_tool_desc(), thinking_desc=thinking_desc)
-            
-            # Filtrowanie narzędzi
-            if mode == "plan":
-                allowed_tools = ["read_file", "list_dir", "grep", "search_web", "save_plan"]
-                filtered_tools = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in allowed_tools]
+    app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    models_dir = os.path.join(app_dir, "models")
+    models = glob.glob(os.path.join(models_dir, "*.gguf"))
+    if not models:
+        console.print("[red]No .gguf models found in models/ directory.[/red]")
+        exit(1)
+        
+    saved_model = state.get("model_path")
+    if saved_model and saved_model in models:
+        return "local", saved_model
+    return "local", models[-1]
+def print_chat_history(context):
+    import re
+    from rich.markdown import Markdown
+    from .ui import console, ACCENT_COLOR, print_tool_call, print_tool_result, print_user_msg, print_code_panel, print_diff
+    import os
+    
+    for msg in context.messages:
+        if msg['role'] == 'user':
+            content = msg.get('content', '')
+            if content.startswith('<tool_response>'):
+                res_str = content.replace('<tool_response>\n', '').replace('\n</tool_response>', '').strip()
+                print_tool_result(res_str[:60].replace("\n", " ") + "..." if len(res_str) > 60 else res_str.replace("\n", " "))
             else:
-                disallowed_tools = ["save_plan"]
-                if level_idx == 4 and iteration == 1:
-                    allowed = ["read_file", "list_dir", "grep", "search_web", "submit_plan"]
-                    filtered_tools = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in allowed]
-                else:
-                    disallowed_tools.append("submit_plan")
-                    filtered_tools = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] not in disallowed_tools]
+                print_user_msg(content)
+        elif msg['role'] == 'assistant':
+            text = msg.get('content', '')
+            text = re.sub(r'<think>.*?(?:</think>|$)', '*(Myślenie ukryte...)*', text, flags=re.DOTALL|re.IGNORECASE)
+            text = re.sub(r'```(?:json)?\s*\{.*?"name"\s*:.*?\}\s*```', '', text, flags=re.DOTALL)
+            text = re.sub(r'\{\s*"name"\s*:.*?"arguments"\s*:.*?\}', '', text, flags=re.DOTALL)
+            text = text.strip()
+            if text:
+                console.print(f"\n")
+                console.print(Markdown(text))
             
-            use_native_tools = (level_idx == 0)
-            if not use_native_tools:
-                messages[0]["content"] += "\n\nCRITICAL: You are configured to use TEXT-BASED TOOL CALLING. You MUST NOT use native function calling. Output your tool call as a JSON markdown block after your <think> block."
-                passed_tools = None
-            else:
-                passed_tools = filtered_tools
-                
-            stream = self.model.stream_chat(messages, tools=passed_tools, reasoning_budget=level_info[1])
-            
-            full_content = ""
-            full_thinking = ""
-            tool_calls = None
-            thinking_newline = True
-            
-            in_thinking_tree = False
-            thinking_buffer = ""
-            
-            plan_finished = False
-            line_buffer = ""
-            first_line_checked = False
-            in_plan = False
-            tool_detected = False
-            printed_idx = 0
-            content_to_print = ""
-            tree_printed = False
-            
-            try:
-                for content, thinking, tc in stream:
-                    if content:
-                        full_content += content
-                        if not tool_detected:
-                            raw = full_content.lstrip()
-                            if raw.startswith("{") or raw.startswith("`") or raw.startswith("n") or raw.startswith("o"):
-                                # Prawdopodobnie blok JSON lub tool call - wstrzymaj drukowanie
-                                pass
-                            else:
-                                chunk = full_content[printed_idx:]
-                                if chunk:
-                                    if tree.live.is_started:
-                                        tree.stop()
-                                        tree.print_tree()
-                                        tree_printed = True
-                                        console.print() # nowa linia po drzewie
-                                    import sys
-                                    console.print(chunk, end="")
-                                    sys.stdout.flush()
-                                    printed_idx = len(full_content)
-                                    
-                    if thinking:
-                        full_thinking += thinking
-                        for char in thinking:
-                            thinking_buffer += char
-                            if char == '\n':
-                                if thinking_buffer.strip():
-                                    tree.add_line(thinking_buffer.rstrip('\n'))
-                                thinking_buffer = ""
-                                
-                    if tc:
-                        tool_detected = True
-                        tool_calls = tc
-            
-                # Opróżnienie bufora jeśli strumień się skończył a to nie było narzędzie
-                if not tool_detected and printed_idx < len(full_content):
-                    content_to_print += full_content[printed_idx:]
-                    printed_idx = len(full_content)
-                    
-            finally:
-                if thinking_buffer.strip():
-                    tree.add_line(thinking_buffer.strip())
-                tree.stop()
-                
-            if not tool_calls:
-                # Fallback: check if the model hallucinated raw JSON tool calls
-                raw = full_content.strip()
-                import re
-                
-                # Extract markdown json blocks
-                json_blocks = re.findall(r'```(?:json)?\s*(\{.*?\})\s*```', raw, re.DOTALL)
-                if json_blocks:
-                    mock_calls = []
-                    for block in json_blocks:
+            if 'tool_calls' in msg and msg['tool_calls']:
+                for tc in msg['tool_calls']:
+                    func = tc.get('function', {})
+                    name = func.get('name', 'unknown')
+                    args = func.get('arguments', {})
+                    if isinstance(args, str):
+                        import json
                         try:
-                            parsed = json.loads(block)
-                            if isinstance(parsed, dict) and "name" in parsed and "arguments" in parsed:
-                                mock_calls.append({"id": "call_mock", "type": "function", "function": parsed})
-                        except json.JSONDecodeError:
-                            pass
-                    if mock_calls:
-                        tool_calls = mock_calls
-                else:
-                    # Extract outermost braces
-                    match = re.search(r'\{.*\}', raw, re.DOTALL)
-                    if match:
-                        raw = match.group(0)
-                        try:
-                            parsed = json.loads(raw)
-                            if isinstance(parsed, dict) and "name" in parsed and "arguments" in parsed:
-                                tool_calls = [{"id": "call_mock", "type": "function", "function": parsed}]
-                        except json.JSONDecodeError:
-                            pass
-                    # If that fails, try finding multiple JSON objects (e.g. {}{})
-                    blocks = re.split(r'}\s*{', raw)
-                    mock_calls = []
-                    for i, b in enumerate(blocks):
-                        if i > 0: b = "{" + b
-                        if i < len(blocks) - 1: b = b + "}"
-                        try:
-                            parsed = json.loads(b)
-                            if isinstance(parsed, dict) and "name" in parsed and "arguments" in parsed:
-                                mock_calls.append({"id": "call_mock", "type": "function", "function": parsed})
-                        except json.JSONDecodeError:
-                            pass
-                    if mock_calls:
-                        tool_calls = mock_calls
-                        full_content = ""
-
-            # Self-Correction Loop for missing thinking, empty response or silent thinking
-            if not full_content.strip() and not tool_calls:
-                if not full_thinking.strip():
-                    console.print("\n[yellow]⚠ Model wygenerował całkowicie pustą odpowiedź. Ponawiam próbę (self-correction)...[/yellow]")
-                    self.context.add_user_message("System Error: Zwróciłeś pustą odpowiedź. Pamiętaj o wygenerowaniu bloku <think> (jeśli wymagany) i podjęciu akcji lub udzieleniu odpowiedzi tekstowej.")
-                else:
-                    console.print("\n[yellow]⚠ Model wygenerował tylko myślenie, ale nie podjął akcji. Ponawiam próbę (self-correction)...[/yellow]")
-                    self.context.add_user_message("System Error: Wygenerowałeś blok <think>, ale nie użyłeś narzędzia ani nie napisałeś żadnej widocznej odpowiedzi poza myśleniem. Użyj narzędzia lub powiedz coś.")
-                continue
-
-            if level_idx > 0 and not full_thinking.strip() and not ("<think>" in full_content):
-                console.print("\n[yellow]⚠ Model zignorował obowiązek myślenia. Ponawiam próbę (self-correction)...[/yellow]")
-                self.context.add_assistant_message(full_content)
-                self.context.add_user_message("System Error: Złamałeś zasady. Musisz wygenerować blok <think>...</think> z analizą przed użyciem narzędzia lub przesłaniem odpowiedzi. Spróbuj ponownie.")
-                continue
-
-            if not tree_printed:
-                tree.print_tree()
-
-            if not tool_calls:
-                if not full_content:
-                    console.print("[gray50](Model nie wygenerował odpowiedzi)[/]")
-                self.context.add_assistant_message(full_content)
-                break
-                
-            self.context.add_assistant_message(full_content, tool_calls=tool_calls)
-            total_tools += len(tool_calls)
-            
-            # Infinite loop protection
-            sig = json.dumps([{"name": tc["function"]["name"], "args": tc["function"].get("arguments", "{}")} for tc in tool_calls])
-            if getattr(self, "last_tool_sig", None) == sig:
-                self.consecutive_identical_calls = getattr(self, "consecutive_identical_calls", 0) + 1
-            else:
-                self.consecutive_identical_calls = 0
-                self.last_tool_sig = sig
-                
-            if self.consecutive_identical_calls >= 2:
-                console.print("\n[red]⚠ Zatrzymano automatyczne wywołania: Wykryto pętlę (model 3 razy powtórzył to samo, błędne narzędzie).[/red]")
-                self.context.add_user_message("System: Przestań używać tego narzędzia, utknąłeś w pętli. Przeanalizuj błąd i powiedz mi, co nie działa, lub poproś o wskazówki.")
-                break
-                
-            # Handle tool calls
-            for tc in tool_calls:
-                func = tc["function"]
-                name = func["name"]
-                args_str = func.get("arguments", "{}")
-                if isinstance(args_str, dict):
-                    args = args_str
-                    args_str = json.dumps(args)
-                else:
-                    try:
-                        args = json.loads(args_str)
-                    except json.JSONDecodeError:
-                        args = {}
+                            args = json.loads(args)
+                        except:
+                            args = {}
+                            
+                    display_name = name.capitalize()
+                    if name.endswith("_file"):
+                        display_name = name.split("_")[0].capitalize()
                         
-                display_name = name.capitalize()
-                if name.endswith("_file"):
-                    display_name = name.split("_")[0].capitalize()
-                
-                arg_summary = ""
-                if "path" in args:
-                    p = args["path"].replace("\\", "/")
-                    parts = p.split("/")
-                    if len(parts) > 3:
-                        arg_summary = ".../" + "/".join(parts[-3:])
-                    else:
-                        arg_summary = p
-                elif "command" in args:
-                    arg_summary = args["command"]
-                elif "pattern" in args:
-                    arg_summary = f'"{args["pattern"]}"'
-                    
-                spinner = None
-                if name in ["grep", "search_web"]:
-                    from .ui import SearchSpinner
-                    spinner = SearchSpinner(args.get("query", args.get("pattern", "")), is_web=(name == "search_web"))
-                    spinner.start()
-                else:
+                    arg_summary = ""
+                    if "path" in args:
+                        p = args["path"].replace("\\", "/")
+                        parts = p.split("/")
+                        arg_summary = ".../" + "/".join(parts[-3:]) if len(parts) > 3 else p
+                        if name == "read_file":
+                            offset = args.get("offset", 0)
+                            limit = args.get("limit", 0)
+                            if offset > 0 or limit > 0:
+                                end_str = f"{offset + limit}" if limit > 0 else "koniec"
+                                arg_summary += f" (linie {offset}-{end_str})"
+                    elif "command" in args:
+                        arg_summary = args["command"]
+                    elif "pattern" in args:
+                        arg_summary = f'"{args["pattern"]}"'
+                        
                     print_tool_call(display_name, arg_summary)
-                
-                # Check for confirmations based on mode
-                is_md_in_plan = mode == "plan" and name in ["write_file", "create_file", "edit_file"] and args.get("path", "").endswith(".md")
-                
-                if mode == "plan" and name in ["write_file", "edit_file", "delete_file", "bash", "create_file", "run_python"] and not is_md_in_plan:
-                    result = "Error: Tool execution blocked in 'plan' mode. You can only create/edit .md files (e.g. plan.md)."
-                    if spinner:
-                        spinner.stop("Error")
-                    else:
-                        print_tool_result(result)
-                else:
-                    is_modifying = name in ["write_file", "edit_file", "delete_file", "create_file", "bash", "run_python"]
-                    is_dangerous = name in ["bash", "run_python"]
                     
                     if name in ["write_file", "create_file"]:
                         print_code_panel(os.path.abspath(args.get("path", "file")), args.get("content", ""))
                     elif name == "edit_file":
                         print_diff(args.get("path", "file"), args.get("old_str", ""), args.get("new_str", ""))
                     elif name == "bash":
-                        cmd_str = args.get("command", "").strip()
-                        if not cmd_str:
-                            # Próba "samoleczenia" - jeśli model nazwał argument "cmd" lub "script" zamiast "command"
-                            for k, v in args.items():
-                                if isinstance(v, str) and v.strip():
-                                    cmd_str = v.strip()
-                                    args["command"] = cmd_str
-                                    break
-                                    
-                        if not cmd_str:
-                            err_msg = "System Error: Zwróciłeś puste polecenie. Musisz podać treść komendy w argumencie 'command'."
-                            print_tool_result("Pusta komenda - odrzucono automatycznie")
-                            self.context.add_tool_message(tc["id"], name, err_msg)
-                            continue
-                        print_code_panel("Terminal", cmd_str, lexer_override="bash")
+                        print_code_panel("Terminal", args.get("command", ""), lexer_override="bash")
                     elif name == "run_python":
                         if "code" in args:
-                            print_code_panel("Python Run (Code)", args["code"], lexer_override="python")
+                            print_code_panel("Python Run (inline)", args.get("code", ""), lexer_override="python")
                         else:
-                            try:
-                                with open(args.get("path", ""), "r", encoding="utf-8") as f:
-                                    file_content = f.read()
-                                print_code_panel(f"Python Run ({args.get('path')})", file_content, lexer_override="python")
-                            except:
-                                print_code_panel("Python Run", f"python {args.get('path', 'script.py')}", lexer_override="bash")
-                        
-                    requires_prompt = False
-                    if mode != "auto" and not is_md_in_plan and is_modifying:
-                        requires_prompt = True
-                    # W trybie auto wszystkie komendy, nawet bash, lecą z automatu:
-                    # elif mode == "auto" and not is_md_in_plan and is_dangerous:
-                    #     requires_prompt = True
-                        
-                    ans = "y"
-                    if requires_prompt:
-                        import questionary
-                        try:
-                            choice = questionary.select(
-                                "Akcja wymaga zatwierdzenia:",
-                                choices=[
-                                    questionary.Choice("Zatwierdź (y)", value="y"),
-                                    questionary.Choice("Odrzuć (n)", value="n"),
-                                    questionary.Choice("Zawsze zezwalaj (a)", value="a")
-                                ]
-                            ).ask()
-                        except Exception:
-                            choice = input("Accept? (y)es (n)o (a)lways: ").strip().lower()
-                        ans = choice if choice else "n"
-                        
-                        if ans == "a":
-                            mode = "auto"
-                            try:
-                                input_handler.mode_index = input_handler.modes.index("auto")
-                            except:
-                                pass
-                                
-                    if ans == "n":
-                        reason = input("  ⎿  Podaj powód odrzucenia (opcjonalnie): ").strip()
-                        if reason:
-                            result = f"User rejected the operation. Reason: {reason}\nPlease rethink and try a different approach."
-                        else:
-                            result = "User rejected the operation. Please rethink and try a different approach."
-                        if spinner: spinner.stop("Rejected")
-                        else: print_tool_result("Odrzucono. Model spróbuje ponownie.")
-                    else:
-                        result = execute_tool(name, args, restricted_dir=os.getcwd() if getattr(self.context, 'ide_mode', False) else None)
-                        
-                        if spinner:
-                            lines = len([l for l in str(result).splitlines() if l.strip() and "Results for" not in l])
-                            summary = f"{lines} results" if "Error" not in str(result) else "Error"
-                            spinner.stop(summary, details=str(result))
-                        elif name in ["read_file"]:
-                            lines = len(str(result).splitlines())
-                            print_tool_result(f"Read {lines} lines")
-                        elif name == "edit_file":
-                            added = len(args.get("new_str", "").splitlines())
-                            removed = len(args.get("old_str", "").splitlines())
-                            print_tool_result(f"Zmieniono {args.get('path', 'file')} ([green]+{added}[/] / [red]-{removed}[/])")
-                        elif name in ["write_file", "create_file"]:
-                            added = len(args.get("content", "").splitlines())
-                            print_tool_result(f"Utworzono/Nadpisano {args.get('path', 'file')} ({added} linii)")
-                        elif name == "bash":
-                            if "Exit code: 0" in str(result):
-                                print_tool_result("Command successful")
-                            else:
-                                print_tool_result("Command failed")
-                        else:
-                            res_str = str(result)
-                            print_tool_result(res_str[:60].replace("\n", " ") + "..." if len(res_str) > 60 else res_str.replace("\n", " "))
+                            print_code_panel("Python Run", f"python {args.get('path', 'script.py')}", lexer_override="bash")
 
-                self.context.add_tool_message(tc["id"], name, str(result))
+def main():
+    console.clear()
+    m_type, m_val = get_default_model()
+    
+    # Initialize components
+    if m_type == "api":
+        from .api_model import OpenAIAPIModel
+        model_path = m_val['name']
+        model = OpenAIAPIModel(model_name=m_val['name'], api_key=m_val['api_key'], base_url=m_val['base_url'])
+    else:
+        model_path = m_val
+        model = LlamaModel(model_path)
+    context = ContextManager()
+    agent = Agent(model, context)
+    
+    saved_state = load_state()
+    input_handler = InputHandler(thinking_idx=saved_state.get("thinking_idx", 1))
+    
+    ide_server = IDEServer()
+    ide_server.start()
+    
+    cwd = os.getcwd()
+    
+    os.system("cls" if os.name == "nt" else "clear")
+    mode = input_handler.get_mode()
+    print_header(os.path.basename(model_path), cwd)
+    
+    import shutil
+    import shutil
+    
+    # We now handle the layout spacing inside prompt_toolkit itself
+    # so that the completion menu knows how much vertical space it has.
+        
+    while True:
+        tokens = context.count_tokens()
+        user_input = input_handler.get_input(os.path.basename(model_path), tokens, model.get_context_limit())
+        mode = input_handler.get_mode()
+        
+        current_state = load_state()
+        if current_state.get("thinking_idx") != input_handler.thinking_idx:
+            current_state["thinking_idx"] = input_handler.thinking_idx
+            save_state(current_state)
+            
+        if not user_input:
+            continue
+            
+        if user_input.startswith("/"):
+            if user_input == "/quit":
+                break
+            elif user_input == "/clear":
+                context.clear()
+                console.clear()
+            elif user_input == "/compact":
+                context.trigger_compaction(model)
+            elif user_input.startswith("/sessions"):
+                while True:
+                    sm = context.session_manager
+                    sessions = sm.get_all_sessions()
+                    
+                    from .session_picker import run_session_picker
+                    res = run_session_picker(sessions, sm.current_state.session_id)
+                    
+                    if res["action"] == "cancel":
+                        console.clear()
+                        print_header(os.path.basename(model_path), cwd)
+                        print_chat_history(context)
+                        break
+                        
+                    if res["action"] == "new":
+                        import questionary
+                        new_id = questionary.text("Podaj nazwę nowej sesji (enter by anulować):").ask()
+                        if new_id and new_id.strip():
+                            new_id = new_id.strip()
+                            context.load_history(new_id)
+                            console.clear()
+                            print_header(os.path.basename(model_path), cwd)
+                            console.print(f"[green]Utworzono i przełączono na sesję: {new_id} (wczytano {len(context.messages)} wiadomości)[/green]")
+                        else:
+                            console.clear()
+                            print_header(os.path.basename(model_path), cwd)
+                            print_chat_history(context)
+                        break
+                    elif res["action"] == "delete":
+                        del_id = res["value"]
+                        sm.delete_session(del_id)
+                        console.clear()
+                        print_header(os.path.basename(model_path), cwd)
+                        console.print(f"[yellow]Pomyślnie usunięto sesję: {del_id}[/yellow]")
+                        
+                        if del_id == sm.current_state.session_id:
+                            context.clear()
+                            console.print("[yellow]Usunięto aktywną sesję. Zaczynamy nową.[/yellow]")
+                        # brak break -> wraca do wyświetlenia listy
+                    elif res["action"] == "load":
+                        s_id = res["value"]
+                        context.load_history(s_id)
+                        console.clear()
+                        print_header(os.path.basename(model_path), cwd)
+                        console.print(f"[green]Przełączono na sesję: {s_id} (wczytano {len(context.messages)} wiadomości)[/green]")
+                        
+                        print_chat_history(context)
+                        break
+                continue
+            elif user_input == "/ide":
+                in_ide = os.environ.get("TERM_PROGRAM") in ["vscode", "JetBrains-JediTerm"] or "VSCODE_PID" in os.environ or "TERMINAL_EMULATOR" in os.environ
+                if not in_ide:
+                    console.print("[red]Błąd: Integracja /ide może być włączona tylko gdy aplikacja działa wewnątrz wbudowanego terminala IDE (VS Code, JetBrains itp.).[/red]")
+                else:
+                    context.ide_mode = True
+                    console.print(f"[green]IDE Server running on port {ide_server.port}. Włączono rygorystyczną izolację projektu.[/green]")
+            elif user_input == "/auto":
+                input_handler.mode_index = input_handler.modes.index("auto")
+                console.print("[green]Tryb zmieniony na: auto[/green]")
+            elif user_input == "/code":
+                input_handler.mode_index = input_handler.modes.index("code")
+                console.print("[green]Tryb zmieniony na: code[/green]")
+            elif user_input == "/plan":
+                input_handler.mode_index = input_handler.modes.index("plan")
+                console.print("[green]Tryb zmieniony na: plan[/green]")
+            elif user_input == "/model":
+                from .model_picker import run_model_picker
+                state = load_state()
+                result = run_model_picker(state)
                 
-        elapsed = time.time() - turn_start
-        tokens = getattr(self.context, 'count_tokens', lambda: 0)()
-        print_turn_done(elapsed, tokens, total_tools)
+                if result["action"] == "add_api":
+                    from .model_picker import run_provider_picker
+                    sub_res = run_provider_picker(mode="api")
+                    if sub_res["action"] == "cancel":
+                        os.system("cls" if os.name == "nt" else "clear")
+                        print_header(os.path.basename(model_path), cwd)
+                        continue
+                        
+                    provider = sub_res["provider"]
+                    api_key = input(f"\n[bold]Podaj klucz API dla {provider.upper()}: [/bold]")
+                    if api_key:
+                        if "api_keys" not in state:
+                            state["api_keys"] = {}
+                        state["api_keys"][provider] = api_key
+                        save_state(state)
+                        console.print(f"[green]Zapisano klucz API dla {provider.upper()}.[/green]")
+                        import time; time.sleep(1)
+                    os.system("cls" if os.name == "nt" else "clear")
+                    print_header(os.path.basename(model_path), cwd)
+                    continue
+                elif result["action"] == "add_model":
+                    from .model_picker import run_provider_picker
+                    sub_res = run_provider_picker(mode="model")
+                    if sub_res["action"] == "cancel":
+                        os.system("cls" if os.name == "nt" else "clear")
+                        print_header(os.path.basename(model_path), cwd)
+                        continue
+                        
+                    provider = sub_res["provider"]
+                    api_keys = state.get("api_keys", {})
+                    if provider not in api_keys:
+                        console.print(f"\n[red]Brak klucza API dla {provider.upper()}! Najpierw wybierz 'Dodaj klucz API'.[/red]")
+                        import time; time.sleep(2)
+                        os.system("cls" if os.name == "nt" else "clear")
+                        print_header(os.path.basename(model_path), cwd)
+                        continue
+                        
+                    model_name = console.input(f"\n[bold]Podaj nazwę modelu dla {provider.upper()}: [/bold]")
+                    if model_name:
+                        if provider == "nvidia":
+                            base_url = "https://integrate.api.nvidia.com/v1"
+                        elif provider == "groq":
+                            base_url = "https://api.groq.com/openai/v1"
+                        elif provider == "openrouter":
+                            base_url = "https://openrouter.ai/api/v1"
+                        elif provider == "cerebras":
+                            base_url = "https://api.cerebras.ai/v1"
+                        else:
+                            base_url = "https://api.openai.com/v1"
+                        new_api_model = {"name": model_name, "api_key": api_keys[provider], "base_url": base_url, "provider": provider}
+                        if "api_models" not in state:
+                            state["api_models"] = []
+                        state["api_models"].append(new_api_model)
+                        save_state(state)
+                        result["action"] = "load_api"
+                        result["value"] = new_api_model
+                    else:
+                        os.system("cls" if os.name == "nt" else "clear")
+                        print_header(os.path.basename(model_path), cwd)
+                        continue
+                        
+                if result["action"] == "cancel":
+                    os.system("cls" if os.name == "nt" else "clear")
+                    print_header(os.path.basename(model_path), cwd)
+                    continue
+                        
+                if result["action"] == "load_local":
+                    new_model_path = result["value"]
+                    state["model_path"] = new_model_path
+                    state["model_type"] = "local"
+                    save_state(state)
+                    console.print(f"\n[green]Przełączono na {os.path.basename(new_model_path)}. ⏳ Trwa ładowanie modelu do VRAM...[/green]")
+                    
+                    del agent.model
+                    del model
+                    import gc
+                    gc.collect()
+                    
+                    model_path = new_model_path
+                    model = LlamaModel(model_path)
+                    agent.model = model
+                    os.system("cls" if os.name == "nt" else "clear")
+                    print_header(os.path.basename(model_path), cwd)
+                    print_chat_history(context)
+                    
+                elif result["action"] == "load_api":
+                    m_val = result["value"]
+                    state["model_type"] = "api"
+                    state["active_api_model"] = m_val
+                    save_state(state)
+                    console.print(f"\n[green]Przełączono na model API: {m_val['name']}[/green]")
+                    
+                    if hasattr(model, 'llm'):
+                        del agent.model
+                        del model
+                        import gc
+                        gc.collect()
+                        
+                    from .api_model import OpenAIAPIModel
+                    model_path = m_val['name']
+                    model = OpenAIAPIModel(model_name=m_val['name'], api_key=m_val['api_key'], base_url=m_val['base_url'])
+                    agent.model = model
+                    os.system("cls" if os.name == "nt" else "clear")
+                    print_header(os.path.basename(model_path), cwd)
+                    print_chat_history(context)
+                continue
+            else:
+                console.print(f"Unknown command or not implemented: {user_input}")
+            continue
+            
+        # Add IDE context to user prompt if any
+        ide_ctx = ide_server.get_ide_context()
+        if ide_ctx:
+            user_input += f"\n\n[IDE Context]\n{ide_ctx}"
+            
+        if len(context.messages) == 0 and context.session_manager.current_state.session_id == "default":
+            import re
+            def get_slug(text):
+                import unicodedata
+                text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8').lower()
+                text = re.sub(r'[^a-z0-9]+', '_', text)
+                return text.strip('_')[:40]
+            
+            try:
+                prompt = f"Wymyśl krótką, opisową nazwę (max 3 słowa) w języku polskim dla zadania: '{user_input[:100]}'. Odpowiedz tylko samą nazwą."
+                msgs = [{"role": "user", "content": prompt}]
+                t_stream = agent.model.stream_chat(msgs, tools=None)
+                title = ""
+                for c, _, _ in t_stream:
+                    if c: title += c
+                slug = get_slug(title)
+                if slug:
+                    context.rename_session(slug)
+                    console.print(f"[dim italic]Auto-nazwa sesji: {slug}[/dim italic]")
+            except Exception:
+                pass
+
+        print_user_msg(user_input)
+        agent.handle_user_input(user_input, mode, input_handler)
+        
+        # Auto-compaction if context exceeds 50%
+        limit = model.get_context_limit()
+        if context.count_tokens() >= limit * 0.5:
+            context.trigger_compaction(model)
+if __name__ == "__main__":
+    main()
