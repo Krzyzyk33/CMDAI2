@@ -104,7 +104,7 @@ class SessionState:
 class SessionManager:
     def __init__(self, cwd: str = "."):
         self.cwd = os.path.abspath(cwd)
-        self.cmdai2_dir = os.path.join(self.cwd, ".cmdai2")
+        self.cmdai2_dir = os.path.join(os.path.expanduser("~"), ".cmdai2")
         self.current_state = SessionState()
         
     def ensure_dir(self):
@@ -139,13 +139,65 @@ class SessionManager:
         else:
             self.current_state = SessionState(session_id=session_id)
             
-    def get_all_sessions(self) -> List[str]:
+    def get_all_sessions(self) -> List[Dict[str, 'Any']]:
+        import datetime
         if not os.path.exists(self.cmdai2_dir):
-            return ["default"]
-        sessions = []
+            return []
+        sessions_dict = {}
         for f in os.listdir(self.cmdai2_dir):
             if f.startswith("session_") and f.endswith(".md"):
-                sessions.append(f[8:-3])
-        if "default" not in sessions:
-            sessions.append("default")
-        return sorted(list(set(sessions)))
+                sid = f[8:-3]
+                path = os.path.join(self.cmdai2_dir, f)
+                mtime = os.path.getmtime(path)
+                sessions_dict[sid] = mtime
+            elif f.startswith("session_") and f.endswith("_history.json"):
+                sid = f[8:-13]
+                path = os.path.join(self.cmdai2_dir, f)
+                mtime = os.path.getmtime(path)
+                if sid not in sessions_dict or sessions_dict[sid] < mtime:
+                    sessions_dict[sid] = mtime
+                    
+        result = []
+        for sid, mtime in sessions_dict.items():
+            dt = datetime.datetime.fromtimestamp(mtime)
+            result.append({"id": sid, "mtime": mtime, "date": dt.strftime("%Y-%m-%d %H:%M")})
+            
+        result.sort(key=lambda x: x["mtime"], reverse=True)
+        return result
+
+    def delete_session(self, session_id: str):
+        if not os.path.exists(self.cmdai2_dir):
+            return
+        
+        md_path = os.path.join(self.cmdai2_dir, f"session_{session_id}.md")
+        json_path = os.path.join(self.cmdai2_dir, f"session_{session_id}_history.json")
+        
+        try:
+            if os.path.exists(md_path):
+                os.remove(md_path)
+            if os.path.exists(json_path):
+                os.remove(json_path)
+        except Exception:
+            pass
+
+    def rename_session(self, new_id: str):
+        if not self.current_state.session_id or self.current_state.session_id == new_id:
+            return
+            
+        old_md = os.path.join(self.cmdai2_dir, f"session_{self.current_state.session_id}.md")
+        old_json = os.path.join(self.cmdai2_dir, f"session_{self.current_state.session_id}_history.json")
+        
+        self.current_state.session_id = new_id
+        
+        new_md = os.path.join(self.cmdai2_dir, f"session_{new_id}.md")
+        new_json = os.path.join(self.cmdai2_dir, f"session_{new_id}_history.json")
+        
+        try:
+            if os.path.exists(old_md):
+                os.rename(old_md, new_md)
+            if os.path.exists(old_json):
+                os.rename(old_json, new_json)
+        except Exception:
+            pass
+            
+        self.save_state()
