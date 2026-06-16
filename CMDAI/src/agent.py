@@ -85,6 +85,7 @@ class Agent:
             tool_detected = False
             printed_idx = 0
             content_to_print = ""
+            tree_printed = False
             
             try:
                 for content, thinking, tc in stream:
@@ -98,6 +99,11 @@ class Agent:
                             else:
                                 chunk = full_content[printed_idx:]
                                 if chunk:
+                                    if tree.live.is_started:
+                                        tree.stop()
+                                        tree.print_tree()
+                                        tree_printed = True
+                                        console.print() # nowa linia po drzewie
                                     import sys
                                     console.print(chunk, end="")
                                     sys.stdout.flush()
@@ -187,7 +193,8 @@ class Agent:
                 self.context.add_user_message("System Error: Złamałeś zasady. Musisz wygenerować blok <think>...</think> z analizą przed użyciem narzędzia lub przesłaniem odpowiedzi. Spróbuj ponownie.")
                 continue
 
-            tree.print_tree()
+            if not tree_printed:
+                tree.print_tree()
 
             if not tool_calls:
                 if not full_content:
@@ -268,7 +275,21 @@ class Agent:
                     elif name == "edit_file":
                         print_diff(args.get("path", "file"), args.get("old_str", ""), args.get("new_str", ""))
                     elif name == "bash":
-                        print_code_panel("Terminal", args.get("command", ""), lexer_override="bash")
+                        cmd_str = args.get("command", "").strip()
+                        if not cmd_str:
+                            # Próba "samoleczenia" - jeśli model nazwał argument "cmd" lub "script" zamiast "command"
+                            for k, v in args.items():
+                                if isinstance(v, str) and v.strip():
+                                    cmd_str = v.strip()
+                                    args["command"] = cmd_str
+                                    break
+                                    
+                        if not cmd_str:
+                            err_msg = "System Error: Zwróciłeś puste polecenie. Musisz podać treść komendy w argumencie 'command'."
+                            print_tool_result("Pusta komenda - odrzucono automatycznie")
+                            self.context.add_tool_message(tc["id"], name, err_msg)
+                            continue
+                        print_code_panel("Terminal", cmd_str, lexer_override="bash")
                     elif name == "run_python":
                         if "code" in args:
                             print_code_panel("Python Run (Code)", args["code"], lexer_override="python")
@@ -283,8 +304,9 @@ class Agent:
                     requires_prompt = False
                     if mode != "auto" and not is_md_in_plan and is_modifying:
                         requires_prompt = True
-                    elif mode == "auto" and not is_md_in_plan and is_dangerous:
-                        requires_prompt = True
+                    # W trybie auto wszystkie komendy, nawet bash, lecą z automatu:
+                    # elif mode == "auto" and not is_md_in_plan and is_dangerous:
+                    #     requires_prompt = True
                         
                     ans = "y"
                     if requires_prompt:
@@ -321,11 +343,11 @@ class Agent:
                         result = execute_tool(name, args, restricted_dir=os.getcwd() if getattr(self.context, 'ide_mode', False) else None)
                         
                         if spinner:
-                            lines = len([l for l in result.splitlines() if l.strip() and "Results for" not in l])
-                            summary = f"{lines} results" if "Error" not in result else "Error"
-                            spinner.stop(summary, details=result)
+                            lines = len([l for l in str(result).splitlines() if l.strip() and "Results for" not in l])
+                            summary = f"{lines} results" if "Error" not in str(result) else "Error"
+                            spinner.stop(summary, details=str(result))
                         elif name in ["read_file"]:
-                            lines = len(result.splitlines())
+                            lines = len(str(result).splitlines())
                             print_tool_result(f"Read {lines} lines")
                         elif name == "edit_file":
                             added = len(args.get("new_str", "").splitlines())
@@ -335,16 +357,16 @@ class Agent:
                             added = len(args.get("content", "").splitlines())
                             print_tool_result(f"Utworzono/Nadpisano {args.get('path', 'file')} ({added} linii)")
                         elif name == "bash":
-                            if "Exit code: 0" in result:
+                            if "Exit code: 0" in str(result):
                                 print_tool_result("Command successful")
                             else:
                                 print_tool_result("Command failed")
                         else:
-                            print_tool_result(result[:60].replace("\n", " ") + "..." if len(result) > 60 else result.replace("\n", " "))
+                            res_str = str(result)
+                            print_tool_result(res_str[:60].replace("\n", " ") + "..." if len(res_str) > 60 else res_str.replace("\n", " "))
 
-                
-                self.context.add_tool_message(tc["id"], name, result)
+                self.context.add_tool_message(tc["id"], name, str(result))
                 
         elapsed = time.time() - turn_start
-        tokens = self.context.count_tokens()
+        tokens = getattr(self.context, 'count_tokens', lambda: 0)()
         print_turn_done(elapsed, tokens, total_tools)
