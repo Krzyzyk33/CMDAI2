@@ -21,7 +21,7 @@ python main.py
 ```
 Or simply use the `cmdai2` batch command if configured.
 
-Select your preferred API provider (OpenAI, Nvidia NIM, Groq), input your API key, and begin chatting.
+Select your preferred API provider [API.md](API.md), input your API key, and begin chatting.
 
 ## Contributing
 Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to contribute.
