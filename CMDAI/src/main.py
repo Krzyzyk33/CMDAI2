@@ -40,6 +40,76 @@ def get_default_model():
     if saved_model and saved_model in models:
         return "local", saved_model
     return "local", models[-1]
+def print_chat_history(context):
+    import re
+    from rich.markdown import Markdown
+    from .ui import console, ACCENT_COLOR, print_tool_call, print_tool_result, print_user_msg, print_code_panel, print_diff
+    import os
+    
+    for msg in context.messages:
+        if msg['role'] == 'user':
+            content = msg.get('content', '')
+            if content.startswith('<tool_response>'):
+                res_str = content.replace('<tool_response>\n', '').replace('\n</tool_response>', '').strip()
+                print_tool_result(res_str[:60].replace("\n", " ") + "..." if len(res_str) > 60 else res_str.replace("\n", " "))
+            else:
+                print_user_msg(content)
+        elif msg['role'] == 'assistant':
+            text = msg.get('content', '')
+            text = re.sub(r'<think>.*?(?:</think>|$)', '*(Myślenie ukryte...)*', text, flags=re.DOTALL|re.IGNORECASE)
+            text = re.sub(r'```(?:json)?\s*\{.*?"name"\s*:.*?\}\s*```', '', text, flags=re.DOTALL)
+            text = re.sub(r'\{\s*"name"\s*:.*?"arguments"\s*:.*?\}', '', text, flags=re.DOTALL)
+            text = text.strip()
+            if text:
+                console.print(f"\n")
+                console.print(Markdown(text))
+            
+            if 'tool_calls' in msg and msg['tool_calls']:
+                for tc in msg['tool_calls']:
+                    func = tc.get('function', {})
+                    name = func.get('name', 'unknown')
+                    args = func.get('arguments', {})
+                    if isinstance(args, str):
+                        import json
+                        try:
+                            args = json.loads(args)
+                        except:
+                            args = {}
+                            
+                    display_name = name.capitalize()
+                    if name.endswith("_file"):
+                        display_name = name.split("_")[0].capitalize()
+                        
+                    arg_summary = ""
+                    if "path" in args:
+                        p = args["path"].replace("\\", "/")
+                        parts = p.split("/")
+                        arg_summary = ".../" + "/".join(parts[-3:]) if len(parts) > 3 else p
+                        if name == "read_file":
+                            offset = args.get("offset", 0)
+                            limit = args.get("limit", 0)
+                            if offset > 0 or limit > 0:
+                                end_str = f"{offset + limit}" if limit > 0 else "koniec"
+                                arg_summary += f" (linie {offset}-{end_str})"
+                    elif "command" in args:
+                        arg_summary = args["command"]
+                    elif "pattern" in args:
+                        arg_summary = f'"{args["pattern"]}"'
+                        
+                    print_tool_call(display_name, arg_summary)
+                    
+                    if name in ["write_file", "create_file"]:
+                        print_code_panel(os.path.abspath(args.get("path", "file")), args.get("content", ""))
+                    elif name == "edit_file":
+                        print_diff(args.get("path", "file"), args.get("old_str", ""), args.get("new_str", ""))
+                    elif name == "bash":
+                        print_code_panel("Terminal", args.get("command", ""), lexer_override="bash")
+                    elif name == "run_python":
+                        if "code" in args:
+                            print_code_panel("Python Run (inline)", args.get("code", ""), lexer_override="python")
+                        else:
+                            print_code_panel("Python Run", f"python {args.get('path', 'script.py')}", lexer_override="bash")
+
 def main():
     console.clear()
     m_type, m_val = get_default_model()
@@ -95,25 +165,54 @@ def main():
             elif user_input == "/compact":
                 context.trigger_compaction(model)
             elif user_input.startswith("/sessions"):
-                sm = context.session_manager
-                sessions = sm.get_all_sessions()
-                console.print("\n[bold]Dostępne sesje:[/bold]")
-                for i, s in enumerate(sessions):
-                    mark = "[green]*[/]" if s == sm.current_state.session_id else " "
-                    console.print(f"  {mark} [{i+1}] {s}")
-                
-                sel = input("\nWybierz numer sesji (lub 'n' by stworzyć nową, enter by anulować): ").strip()
-                if sel.lower() == 'n':
-                    new_id = input("Podaj nazwę nowej sesji: ").strip()
-                    if new_id:
-                        sm.load_state(new_id)
-                        context.messages = []
-                        console.print(f"[green]Utworzono i przełączono na sesję: {new_id}[/green]")
-                elif sel.isdigit() and 1 <= int(sel) <= len(sessions):
-                    s_id = sessions[int(sel)-1]
-                    sm.load_state(s_id)
-                    context.messages = []
-                    console.print(f"[green]Przełączono na sesję: {s_id}[/green]")
+                while True:
+                    sm = context.session_manager
+                    sessions = sm.get_all_sessions()
+                    
+                    from .session_picker import run_session_picker
+                    res = run_session_picker(sessions, sm.current_state.session_id)
+                    
+                    if res["action"] == "cancel":
+                        console.clear()
+                        print_header(os.path.basename(model_path), cwd)
+                        print_chat_history(context)
+                        break
+                        
+                    if res["action"] == "new":
+                        import questionary
+                        new_id = questionary.text("Podaj nazwę nowej sesji (enter by anulować):").ask()
+                        if new_id and new_id.strip():
+                            new_id = new_id.strip()
+                            context.load_history(new_id)
+                            console.clear()
+                            print_header(os.path.basename(model_path), cwd)
+                            console.print(f"[green]Utworzono i przełączono na sesję: {new_id} (wczytano {len(context.messages)} wiadomości)[/green]")
+                        else:
+                            console.clear()
+                            print_header(os.path.basename(model_path), cwd)
+                            print_chat_history(context)
+                        break
+                    elif res["action"] == "delete":
+                        del_id = res["value"]
+                        sm.delete_session(del_id)
+                        console.clear()
+                        print_header(os.path.basename(model_path), cwd)
+                        console.print(f"[yellow]Pomyślnie usunięto sesję: {del_id}[/yellow]")
+                        
+                        if del_id == sm.current_state.session_id:
+                            context.clear()
+                            console.print("[yellow]Usunięto aktywną sesję. Zaczynamy nową.[/yellow]")
+                        # brak break -> wraca do wyświetlenia listy
+                    elif res["action"] == "load":
+                        s_id = res["value"]
+                        context.load_history(s_id)
+                        console.clear()
+                        print_header(os.path.basename(model_path), cwd)
+                        console.print(f"[green]Przełączono na sesję: {s_id} (wczytano {len(context.messages)} wiadomości)[/green]")
+                        
+                        print_chat_history(context)
+                        break
+                continue
             elif user_input == "/ide":
                 in_ide = os.environ.get("TERM_PROGRAM") in ["vscode", "JetBrains-JediTerm"] or "VSCODE_PID" in os.environ or "TERMINAL_EMULATOR" in os.environ
                 if not in_ide:
@@ -172,16 +271,19 @@ def main():
                         print_header(os.path.basename(model_path), cwd)
                         continue
                         
-                    model_name = input(f"\n[bold]Podaj nazwę modelu dla {provider.upper()}: [/bold]")
+                    model_name = console.input(f"\n[bold]Podaj nazwę modelu dla {provider.upper()}: [/bold]")
                     if model_name:
-                        base_url = "https://integrate.api.nvidia.com/v1" if provider == "nvidia" else "https://api.openai.com/v1"
                         if provider == "nvidia":
                             base_url = "https://integrate.api.nvidia.com/v1"
                         elif provider == "groq":
                             base_url = "https://api.groq.com/openai/v1"
+                        elif provider == "openrouter":
+                            base_url = "https://openrouter.ai/api/v1"
+                        elif provider == "cerebras":
+                            base_url = "https://api.cerebras.ai/v1"
                         else:
                             base_url = "https://api.openai.com/v1"
-                        new_api_model = {"name": model_name, "api_key": api_keys[provider], "base_url": base_url}
+                        new_api_model = {"name": model_name, "api_key": api_keys[provider], "base_url": base_url, "provider": provider}
                         if "api_models" not in state:
                             state["api_models"] = []
                         state["api_models"].append(new_api_model)
@@ -215,6 +317,7 @@ def main():
                     agent.model = model
                     os.system("cls" if os.name == "nt" else "clear")
                     print_header(os.path.basename(model_path), cwd)
+                    print_chat_history(context)
                     
                 elif result["action"] == "load_api":
                     m_val = result["value"]
@@ -235,6 +338,7 @@ def main():
                     agent.model = model
                     os.system("cls" if os.name == "nt" else "clear")
                     print_header(os.path.basename(model_path), cwd)
+                    print_chat_history(context)
                 continue
             else:
                 console.print(f"Unknown command or not implemented: {user_input}")
@@ -245,6 +349,28 @@ def main():
         if ide_ctx:
             user_input += f"\n\n[IDE Context]\n{ide_ctx}"
             
+        if len(context.messages) == 0 and context.session_manager.current_state.session_id == "default":
+            import re
+            def get_slug(text):
+                import unicodedata
+                text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8').lower()
+                text = re.sub(r'[^a-z0-9]+', '_', text)
+                return text.strip('_')[:40]
+            
+            try:
+                prompt = f"Wymyśl krótką, opisową nazwę (max 3 słowa) w języku polskim dla zadania: '{user_input[:100]}'. Odpowiedz tylko samą nazwą."
+                msgs = [{"role": "user", "content": prompt}]
+                t_stream = agent.model.stream_chat(msgs, tools=None)
+                title = ""
+                for c, _, _ in t_stream:
+                    if c: title += c
+                slug = get_slug(title)
+                if slug:
+                    context.rename_session(slug)
+                    console.print(f"[dim italic]Auto-nazwa sesji: {slug}[/dim italic]")
+            except Exception:
+                pass
+
         print_user_msg(user_input)
         agent.handle_user_input(user_input, mode, input_handler)
         
