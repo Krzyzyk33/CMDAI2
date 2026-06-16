@@ -86,8 +86,16 @@ class OpenAIAPIModel:
                         if not in_thinking:
                             idx1 = content_buffer.find("<think>")
                             idx2 = content_buffer.find("<thinking>")
-                            idx = idx1 if idx1 != -1 else idx2
-                            tag_len = 7 if idx1 != -1 else 10
+                            idx3 = content_buffer.find("<|channel>thought")
+                            
+                            idx = idx1
+                            tag_len = 7
+                            if idx2 != -1 and (idx == -1 or idx2 < idx):
+                                idx = idx2
+                                tag_len = 10
+                            if idx3 != -1 and (idx == -1 or idx3 < idx):
+                                idx = idx3
+                                tag_len = 18
                             
                             if idx != -1:
                                 if idx > 0:
@@ -106,8 +114,16 @@ class OpenAIAPIModel:
                         else:
                             idx1 = content_buffer.find("</think>")
                             idx2 = content_buffer.find("</thinking>")
-                            idx = idx1 if idx1 != -1 else idx2
-                            tag_len = 8 if idx1 != -1 else 11
+                            idx3 = content_buffer.find("<channel|>")
+                            
+                            idx = idx1
+                            tag_len = 8
+                            if idx2 != -1 and (idx == -1 or idx2 < idx):
+                                idx = idx2
+                                tag_len = 11
+                            if idx3 != -1 and (idx == -1 or idx3 < idx):
+                                idx = idx3
+                                tag_len = 10
                             
                             if idx != -1:
                                 if idx > 0:
