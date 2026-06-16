@@ -91,16 +91,53 @@ Na koniec: ✻ Gotowe (<T>s · <K>k tokenów · <N> akcji · esc = przerwij)
 PAMIĘTAJ: Zawsze generuj te bloki na podstawie rzeczywistych wyników narzędzi, NIE WYMYŚLAJ ich z góry.
 """
 class ContextManager:
-    def __init__(self, cwd: str = "."):
+    def __init__(self, cwd: str = ".", session_id: str = None):
         self.cwd = os.path.abspath(cwd)
         self.messages: List[Dict[str, str]] = []
         self.system_prompt = SYSTEM_PROMPT
         
         from .session import SessionManager
         self.session_manager = SessionManager(cwd)
-        self.session_manager.load_state()
+        
+        if session_id:
+            self.session_manager.load_state(session_id)
+        else:
+            import datetime
+            new_id = "czat_" + datetime.datetime.now().strftime("%d%m_%H%M%S")
+            self.session_manager.load_state(new_id)
+            
+        self.load_history()
         
         self._load_project_context()
+    def save_history(self):
+        import json
+        self.session_manager.ensure_dir()
+        path = os.path.join(self.session_manager.cmdai2_dir, f"session_{self.session_manager.current_state.session_id}_history.json")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.messages, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def load_history(self, session_id=None):
+        import json
+        if session_id:
+            self.session_manager.load_state(session_id)
+        
+        path = os.path.join(self.session_manager.cmdai2_dir, f"session_{self.session_manager.current_state.session_id}_history.json")
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    self.messages = json.load(f)
+            except Exception:
+                self.messages = []
+        else:
+            self.messages = []
+            
+    def rename_session(self, new_id: str):
+        self.session_manager.rename_session(new_id)
+        self.save_history()
+
     def _load_project_context(self):
         cmdai_file = os.path.join(self.cwd, "CMDAI2.md")
         if os.path.exists(cmdai_file):
@@ -183,6 +220,7 @@ class ContextManager:
         return {"role": "system", "content": prompt}
     def add_user_message(self, msg: str):
         self.messages.append({"role": "user", "content": msg})
+        self.save_history()
     def add_assistant_message(self, msg: str, tool_calls=None):
         m = {"role": "assistant", "content": msg}
         if tool_calls:
@@ -197,16 +235,19 @@ class ContextManager:
                 formatted_tc.append(new_tc)
             m["tool_calls"] = formatted_tc
         self.messages.append(m)
+        self.save_history()
     def add_tool_message(self, tool_call_id: str, name: str, content: str):
         # Format explicitly as a user message to bypass llama-cpp-python template limitations
         self.messages.append({
             "role": "user",
             "content": f"<tool_response>\n{content}\n</tool_response>"
         })
+        self.save_history()
     def get_messages(self, tools_desc: str = "", mode: str = "auto", thinking_desc: str = "") -> List[Dict[str, str]]:
         return [self.get_system_message(tools_desc, mode, thinking_desc)] + self.messages
     def clear(self):
         self.messages = []
+        self.save_history()
         
     def count_tokens(self) -> int:
         # Pomiń system prompt, żeby pasek zaczynał od 0% (pokazujemy zużycie "rozmową")
