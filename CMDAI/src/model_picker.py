@@ -44,7 +44,8 @@ def create_picker_app(tabs, options_dict, start_tab=0):
         
     @bindings.add("enter")
     def _(event):
-        result["tab"] = tabs
+        result["tab"] = tabs[current_tab]
+        result["value"] = options_dict[current_tab][selected_index[current_tab]]
         result["action"] = "select"
         event.app.exit()
         
@@ -101,11 +102,21 @@ def run_model_picker(state):
     
     api_models = state.get("api_models", [])
     
+    def get_prov(m):
+        p = m.get('provider')
+        if p: return p.upper()
+        url = m.get('base_url', '')
+        if 'nvidia' in url: return 'NVIDIA'
+        if 'groq' in url: return 'GROQ'
+        if 'openrouter' in url: return 'OPENROUTER'
+        if 'cerebras' in url: return 'CEREBRAS'
+        return 'OPENAI'
+        
     tabs = ["Ustawienia", "Lokalne modele", "Modele API"]
     options = {
         0: ["Dodaj model", "Dodaj klucz API", "Edytuj modele", "Wyjdź"],
         1: local_models if local_models else ["Brak modeli lokalnych"],
-        2: [m["name"] for m in api_models] if api_models else ["Brak modeli API"]
+        2: [f"{m['name']} [{get_prov(m)}]" for m in api_models] if api_models else ["Brak modeli API"]
     }
     
     res = create_picker_app(tabs, options, start_tab=1)
@@ -127,22 +138,28 @@ def run_model_picker(state):
             if val != "Brak modeli API":
                 out["action"] = "load_api"
                 for m in api_models:
-                    if m["name"] == val:
+                    if f"{m['name']} [{get_prov(m)}]" == val:
                         out["value"] = m
                         break
     return out
 
 def run_provider_picker(mode="api"):
-    tabs = ["Nvidia NIM", "OpenAI"]
+    tabs = ["Nvidia NIM", "OpenAI", "OpenRouter", "Groq", "Cerebras"]
     if mode == "api":
         options = {
             0: ["Wpisz klucz API", "Anuluj"],
-            1: ["Wpisz klucz API", "Anuluj"]
+            1: ["Wpisz klucz API", "Anuluj"],
+            2: ["Wpisz klucz API", "Anuluj"],
+            3: ["Wpisz klucz API", "Anuluj"],
+            4: ["Wpisz klucz API", "Anuluj"]
         }
     else:
         options = {
             0: ["Wpisz nazwę modelu", "Anuluj"],
-            1: ["Wpisz nazwę modelu", "Anuluj"]
+            1: ["Wpisz nazwę modelu", "Anuluj"],
+            2: ["Wpisz nazwę modelu", "Anuluj"],
+            3: ["Wpisz nazwę modelu", "Anuluj"],
+            4: ["Wpisz nazwę modelu", "Anuluj"]
         }
         
     res = create_picker_app(tabs, options, start_tab=0)
@@ -154,5 +171,11 @@ def run_provider_picker(mode="api"):
             out["provider"] = "nvidia"
         elif res["tab"] == "OpenAI":
             out["provider"] = "openai"
+        elif res["tab"] == "OpenRouter":
+            out["provider"] = "openrouter"
+        elif res["tab"] == "Groq":
+            out["provider"] = "groq"
+        elif res["tab"] == "Cerebras":
+            out["provider"] = "cerebras"
             
     return out
