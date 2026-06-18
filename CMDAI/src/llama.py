@@ -2,20 +2,60 @@ import json
 import re
 from typing import List, Dict, Any, Generator, Tuple
 from llama_cpp import Llama
+import llama_cpp
+import ctypes
+
+def _mute_log(level, text, user_data):
+    pass
+
+try:
+    _mute_log_cb = llama_cpp.llama_log_callback(_mute_log)
+    llama_cpp.llama_log_set(_mute_log_cb, ctypes.c_void_p())
+except:
+    pass
+
 class LlamaModel:
-    def __init__(self, model_path: str, n_ctx: int = 8192, n_gpu_layers: int = 16):
+    def __init__(self, model_path: str, n_ctx: int = 0, n_gpu_layers: int = 8):
         import os
         self.model_path = os.path.abspath(model_path)
         self.n_ctx = n_ctx
-        self.llm = Llama(
-            model_path=self.model_path,
-            n_ctx=n_ctx,
-            n_gpu_layers=n_gpu_layers,
-            verbose=False
-        )
+        self.n_gpu_layers = n_gpu_layers
+        self._llm = None
+        
+    @property
+    def llm(self):
+        if self._llm is None:
+            from llama_cpp import Llama
+            try:
+                self._llm = Llama(
+                    model_path=self.model_path,
+                    n_ctx=self.n_ctx,
+                    n_gpu_layers=self.n_gpu_layers,
+                    verbose=False
+                )
+            except ValueError as e:
+                if "Failed to create llama_context" in str(e) or "Failed to load model" in str(e):
+                    if self.n_ctx == 0 or self.n_ctx > 8192:
+                        from rich.console import Console
+                        console = Console()
+                        console.print("\n[yellow]Ostrzeżenie: Brak VRAM dla pełnego okna kontekstowego (n_ctx=0). Wykonuję awaryjny fallback do bezpiecznych 8192 tokenów...[/yellow]")
+                        self.n_ctx = 8192
+                        self._llm = Llama(
+                            model_path=self.model_path,
+                            n_ctx=self.n_ctx,
+                            n_gpu_layers=self.n_gpu_layers,
+                            verbose=False
+                        )
+                    else:
+                        raise e
+                else:
+                    raise e
+        return self._llm
         
     def get_context_limit(self) -> int:
-        return self.n_ctx
+        if self._llm is not None:
+            return self.llm.n_ctx()
+        return 16384 if self.n_ctx == 0 else self.n_ctx
         
     def stream_chat(self, messages: List[Dict[str, str]], tools: List[Dict[str, Any]] = None, **kwargs) -> Generator[Tuple[str, str, Dict], None, None]:
         """

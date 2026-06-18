@@ -7,16 +7,12 @@ from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.styles import Style
 
 def run_session_picker(sessions, current_session_id):
-    """
-    sessions to lista słowników: [{"id": "xyz", "date": "2026-06-16 12:00"}, ...]
-    """
     options = ["[Nowa sesja]"]
     for s in sessions:
         options.append(s)
     options.append("[Anuluj]")
     
     selected_index = 0
-    # Stan usuwania: jeśli delete_mode to True, użytkownik wcisnął strzałkę w prawo
     delete_mode = False
     
     result = {"action": "cancel", "value": None}
@@ -45,7 +41,7 @@ def run_session_picker(sessions, current_session_id):
     def _(event):
         nonlocal delete_mode
         opt = options[selected_index]
-        if isinstance(opt, dict): # Tylko prawdziwe sesje można usunąć
+        if isinstance(opt, dict): 
             delete_mode = True
             
     @bindings.add("left")
@@ -71,37 +67,35 @@ def run_session_picker(sessions, current_session_id):
         event.app.exit()
         
     def get_formatted_text():
-        text = [
-            ("class:title", "Wybierz sesję (Strzałki: góra/dół. Prawa strzałka = usuń):\n"),
-            ("", "―" * 50 + "\n")
-        ]
+        lines = []
+        lines.append(("", "\n"))
+        lines.append(("class:active_tab", "  > Menadżer Sesji  \n\n"))
         
         for i, opt in enumerate(options):
             is_selected = (i == selected_index)
-            prefix = "> " if is_selected else "  "
             
             if isinstance(opt, str):
-                line = f"{prefix}{opt}"
-                style = "class:selected" if is_selected else ""
-                text.append((style, line + "\n"))
+                if is_selected:
+                    lines.append(("class:selected", f" > {opt}\n"))
+                else:
+                    lines.append(("class:unselected", f"   {opt}\n"))
             else:
                 s_id = opt["id"]
                 s_date = opt["date"]
-                active_mark = "* " if s_id == current_session_id else "  "
+                active_mark = "*" if s_id == current_session_id else " "
                 
                 if is_selected and delete_mode:
-                    line = f"{prefix}{active_mark}{s_id} ({s_date})   [Wciśnij ENTER, aby potwierdzić USUNIĘCIE]"
-                    style = "class:delete_mode"
+                    lines.append(("class:delete_mode", f" > {active_mark} {s_id} ({s_date})  [Wciśnij ENTER, by usunąć]\n"))
                 else:
-                    delete_hint = "   [-> Usuń]" if is_selected else ""
-                    line = f"{prefix}{active_mark}{s_id} ({s_date}){delete_hint}"
-                    style = "class:selected" if is_selected else ("class:active" if active_mark.strip() else "")
+                    delete_hint = "  (Naciśnij '→', by usunąć)" if is_selected else ""
+                    if is_selected:
+                        lines.append(("class:selected", f" > {active_mark} {s_id} ({s_date}){delete_hint}\n"))
+                    else:
+                        style = "class:active_item" if s_id == current_session_id else "class:unselected"
+                        lines.append((style, f"   {active_mark} {s_id} ({s_date})\n"))
                 
-                text.append((style, line + "\n"))
-                
-        text.append(("", "―" * 50 + "\n"))
-        text.append(("", " ENTER - wybierz/zatwierdź | Q - wyjście"))
-        return text
+        lines.append(("class:help", "\n(Strzałki góra/dół: nawigacja | Strzałka w prawo: usuń | Enter: wybór | q: wyjście)\n"))
+        return lines
 
     layout = Layout(
         HSplit([
@@ -109,12 +103,15 @@ def run_session_picker(sessions, current_session_id):
         ])
     )
     
-    style = Style([
-        ("title", "bold #00ff00"),
-        ("selected", "bg:#333333 #ffffff"),
-        ("active", "#00ffff"),
-        ("delete_mode", "bg:#ff0000 #ffffff bold"),
-    ])
+    style = Style.from_dict({
+        "active_tab": "fg:#00ffff bold",
+        "inactive_tab": "fg:#aaaaaa",
+        "selected": "fg:#00ffff bold",
+        "unselected": "fg:#aaaaaa",
+        "active_item": "fg:#ffffff",
+        "delete_mode": "fg:#ff0000 bold",
+        "help": "fg:#666666 italic"
+    })
     
     app = Application(
         layout=layout,

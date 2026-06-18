@@ -312,7 +312,6 @@ class InputHandler:
             return "/quit"
         except Exception as e:
             if type(e).__name__ == "NoConsoleScreenBufferError":
-                print("\n[Warning: Environment lacks full console buffer support (common in IDE terminals). Using simplified mode]")
                 return input("> ")
             raise
             

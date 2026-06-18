@@ -22,8 +22,8 @@ class Agent:
         import time
         from .ui import print_turn_done
         
-        # 8k Engine: Automatyczne zarządzanie rozmiarem kontekstu
-        if self.context.get_token_count() > 8000:
+        # 8k Engine: Automatyczne zarządzanie rozmiarem kontekstu (90% maksymalnego okna)
+        if self.context.get_token_count() >= self.model.get_context_limit() * 0.9:
             self.context.trigger_compaction(self.model)
             
         self.context.add_user_message(user_msg)
@@ -75,8 +75,14 @@ class Agent:
             else:
                 passed_tools = filtered_tools
                 
-            stream = self.model.stream_chat(messages, tools=passed_tools, reasoning_budget=level_info[1])
-            
+            try:
+                if hasattr(self.model, "llm"):
+                    _ = self.model.llm
+                stream = self.model.stream_chat(messages, tools=passed_tools, reasoning_budget=level_info[1])
+            except Exception as e:
+                console.print(f"\n[red bold]Błąd ładowania modelu: {e}[/red bold]\n[yellow]Wpisz /model aby zmienić na poprawny model![/yellow]")
+                return
+                
             full_content = ""
             full_thinking = ""
             tool_calls = None
@@ -149,6 +155,13 @@ class Agent:
                     content_to_print += full_content[printed_idx:]
                     printed_idx = len(full_content)
                     
+            except Exception as e:
+                error_str = str(e)
+                if "exceed context window" in error_str:
+                    console.print(f"\n[red bold]Błąd: Przepełniono pamięć kontekstu (za dużo tekstu): {error_str}[/red bold]\n[yellow]Wyczyść historię wpisując komendę /clear, lub skróć swój ostatni prompt.[/yellow]")
+                else:
+                    console.print(f"\n[red bold]Krytyczny błąd silnika podczas generowania: {error_str}[/red bold]\n[yellow]Najprawdopodobniej brakło pamięci VRAM (Out Of Memory) lub format modelu nie jest do końca wspierany.[/yellow]")
+                return
             finally:
                 if thinking_buffer.strip():
                     tree.add_line(thinking_buffer.strip())

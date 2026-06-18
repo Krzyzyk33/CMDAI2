@@ -473,9 +473,9 @@ def main():
         print_user_msg(user_input)
         agent.handle_user_input(user_input, mode, input_handler)
         
-        # Auto-compaction if context exceeds 50%
+        # Auto-compaction if context exceeds 90%
         limit = model.get_context_limit()
-        if context.count_tokens() >= limit * 0.5:
+        if context.count_tokens() >= limit * 0.9:
             context.trigger_compaction(model)
 if __name__ == "__main__":
     main()
