@@ -1,7 +1,10 @@
---------------Legend---------------
+# Legend:
+
 🟢 - it is there and it works
 🟡 - it is, but sometimes it works, sometimes it doesn't
 🔴 - There isn't
+
+# API providers:
 
 1. Open AI 🟢
 2. NIVIDIA Nim 🟢
