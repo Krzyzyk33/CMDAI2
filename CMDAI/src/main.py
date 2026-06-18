@@ -56,7 +56,7 @@ def print_chat_history(context):
                 print_user_msg(content)
         elif msg['role'] == 'assistant':
             text = msg.get('content', '')
-            text = re.sub(r'<think>.*?(?:</think>|$)', '*(Myślenie ukryte...)*', text, flags=re.DOTALL|re.IGNORECASE)
+            text = re.sub(r'<think>.*?(?:</think>|$)', '*(Thinking hidden...)*', text, flags=re.DOTALL|re.IGNORECASE)
             text = re.sub(r'```(?:json)?\s*\{.*?"name"\s*:.*?\}\s*```', '', text, flags=re.DOTALL)
             text = re.sub(r'\{\s*"name"\s*:.*?"arguments"\s*:.*?\}', '', text, flags=re.DOTALL)
             text = text.strip()
@@ -197,11 +197,11 @@ def main():
                         sm.delete_session(del_id)
                         console.clear()
                         print_header(os.path.basename(model_path), cwd)
-                        console.print(f"[yellow]Pomyślnie usunięto sesję: {del_id}[/yellow]")
+                        console.print(f"[yellow]Successfully deleted session: {del_id}[/yellow]")
                         
                         if del_id == sm.current_state.session_id:
                             context.clear()
-                            console.print("[yellow]Usunięto aktywną sesję. Zaczynamy nową.[/yellow]")
+                            console.print("[yellow]Deleted active session. Starting a new one.[/yellow]")
                         # brak break -> wraca do wyświetlenia listy
                     elif res["action"] == "load":
                         s_id = res["value"]
@@ -243,14 +243,26 @@ def main():
                         continue
                         
                     provider = sub_res["provider"]
-                    api_key = input(f"\n[bold]Podaj klucz API dla {provider.upper()}: [/bold]")
+                    api_key = console.input(f"\n[bold]Enter API key for {provider.upper()}: [/bold]")
                     if api_key:
                         if "api_keys" not in state:
                             state["api_keys"] = {}
                         state["api_keys"][provider] = api_key
                         save_state(state)
-                        console.print(f"[green]Zapisano klucz API dla {provider.upper()}.[/green]")
+                        console.print(f"[green]Saved API key for {provider.upper()}.[/green]")
                         import time; time.sleep(1)
+                    os.system("cls" if os.name == "nt" else "clear")
+                    print_header(os.path.basename(model_path), cwd)
+                    continue
+                elif result["action"] == "edit_api":
+                    from .manager_ui import run_api_keys_manager
+                    run_api_keys_manager(state, save_state)
+                    os.system("cls" if os.name == "nt" else "clear")
+                    print_header(os.path.basename(model_path), cwd)
+                    continue
+                elif result["action"] == "edit_models":
+                    from .manager_ui import run_models_manager
+                    run_models_manager(state, save_state)
                     os.system("cls" if os.name == "nt" else "clear")
                     print_header(os.path.basename(model_path), cwd)
                     continue
@@ -265,7 +277,7 @@ def main():
                     provider = sub_res["provider"]
                     api_keys = state.get("api_keys", {})
                     if provider not in api_keys:
-                        console.print(f"\n[red]Brak klucza API dla {provider.upper()}! Najpierw wybierz 'Dodaj klucz API'.[/red]")
+                        console.print(f"\n[red]Missing API key for {provider.upper()}! Please select 'Add API key' first.[/red]")
                         import time; time.sleep(2)
                         os.system("cls" if os.name == "nt" else "clear")
                         print_header(os.path.basename(model_path), cwd)
@@ -273,14 +285,10 @@ def main():
                         
                     model_name = console.input(f"\n[bold]Podaj nazwę modelu dla {provider.upper()}: [/bold]")
                     if model_name:
-                        if provider == "nvidia":
-                            base_url = "https://integrate.api.nvidia.com/v1"
-                        elif provider == "groq":
-                            base_url = "https://api.groq.com/openai/v1"
-                        elif provider == "openrouter":
-                            base_url = "https://openrouter.ai/api/v1"
-                        elif provider == "cerebras":
-                            base_url = "https://api.cerebras.ai/v1"
+                        from src.providers import get_provider
+                        provider_module = get_provider(provider)
+                        if provider_module:
+                            base_url = provider_module.BASE_URL
                         else:
                             base_url = "https://api.openai.com/v1"
                         new_api_model = {"name": model_name, "api_key": api_keys[provider], "base_url": base_url, "provider": provider}
@@ -305,7 +313,7 @@ def main():
                     state["model_path"] = new_model_path
                     state["model_type"] = "local"
                     save_state(state)
-                    console.print(f"\n[green]Przełączono na {os.path.basename(new_model_path)}. ⏳ Trwa ładowanie modelu do VRAM...[/green]")
+                    console.print(f"\n[green]Switched to {os.path.basename(new_model_path)}. ⏳ Loading model into VRAM...[/green]")
                     
                     del agent.model
                     del model

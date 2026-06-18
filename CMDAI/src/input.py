@@ -6,18 +6,18 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 from prompt_toolkit.shortcuts import CompleteStyle
 COMMANDS = {
-    "/help": "wyświetl szczegółową instrukcję i dostępne skróty klawiszowe",
-    "/model": "zmień aktualnie używany model sztucznej inteligencji na inny",
-    "/clear": "wyczyść całą historię czatu oraz bufor pamięci z ekranu",
-    "/compact": "streść dotychczasową rozmowę, aby zaoszczędzić tokeny",
+    "/help": "display detailed instructions and available keyboard shortcuts",
+    "/model": "switch the currently used artificial intelligence model to another one",
+    "/clear": "clear the entire chat history and the console screen buffer",
+    "/compact": "summarize the conversation so far to save tokens",
     "/init": "przeskanuj całe repozytorium i zbuduj bazę wiedzy o plikach",
     "/cost": "pokaż dokładne statystyki zużycia tokenów oraz koszty sesji",
     "/ide": "wyświetl obecny status połączenia z Twoim środowiskiem IDE",
     "/auto": "przełącz w tryb automatyczny (bez pytania o zgody na pliki)",
     "/code": "przełącz w tryb kodowania (pyta o zgodę przed edycją)",
-    "/plan": "przełącz w tryb planowania (tylko czyta pliki i planuje)",
-    "/sessions": "zarządzaj sesjami kontekstowymi i powróć do starego stanu",
-    "/quit": "zakończ działanie programu i zamknij okno terminala"
+    "/plan": "switch to planning mode (only reads files and plans)",
+    "/sessions": "manage contextual sessions and revert to an older state",
+    "/quit": "terminate the program and close the terminal window"
 }
 class CMDAICompleter(Completer):
     def get_completions(self, document, complete_event):
@@ -47,11 +47,11 @@ class InputHandler:
         self.modes = ["code", "auto", "plan"]
         self.thinking_expanded = True
         self.thinking_levels = [
-            ("· Low", 1024, "Pominięty (max 1 linia na plik)", "Brak sub-drzew", "Brak wymuszonych akcji"),
-            ("◐ Medium", 2048, "2 pola: ROZUMIEM + PLAN", "Brak sub-drzew", "Search callerów (tak), Build (nie)"),
-            ("◑ High", 4096, "4 pola: ROZ. + OPCJE + WYBÓR + PLAN", "Sub-drzewa rzadko", "Search callerów (tak), Build (tak)"),
-            ("◕ Ultra", 8192, "6 pól (z RYZYKIEM)", "Sub-drzewa zawsze", "Wszystko + Identyfikacja ryzyka"),
-            ("● Extreme", 16384, "6 pól + Re-walidacja na końcu", "Sub-drzewa i sub-sub zawsze", "Testy po build + osobny krok re-walidacji")
+            (". Low", 1024, "Skipped (max 1 line per file)", "No sub-trees", "No forced actions"),
+            ("◐ Medium", 2048, "2 fields: UNDERSTAND + PLAN", "No sub-trees", "Search callers (yes), Build (no)"),
+            ("◑ High", 4096, "4 fields: UND. + OPTIONS + CHOICE + PLAN", "Sub-trees rarely", "Search callers (yes), Build (yes)"),
+            ("◕ Ultra", 8192, "6 fields (with RISK)", "Sub-trees always", "Everything + Risk identification"),
+            ("● Extreme", 16384, "6 fields + Re-validation at the end", "Sub and sub-sub always", "Tests after build + separate re-validation step")
         ]
         self.thinking_idx = thinking_idx
         
@@ -147,7 +147,7 @@ class InputHandler:
             completer=CMDAICompleter(),
             key_bindings=self.bindings,
             style=Style.from_dict({
-                'prompt': '#D97757 bold',
+                'prompt': 'white bold',
                 'bottom-toolbar': 'default',
             }),
             complete_style=CompleteStyle.READLINE_LIKE,
@@ -175,7 +175,7 @@ class InputHandler:
                 
                 new_fragments = []
                 if ti.lineno > 0:
-                    new_fragments.append(('fg:#D97757', '│   '))
+                    new_fragments.append(('fg:white', '│   '))
                     
                 current_line_len = 0
                 
@@ -184,9 +184,9 @@ class InputHandler:
                         if char == '\n':
                             pad = W - current_line_len
                             new_fragments.append(('', ' ' * pad))
-                            new_fragments.append(('fg:#D97757', '│'))
+                            new_fragments.append(('fg:white', '│'))
                             new_fragments.append(('', ' ' * (term_width - width)))
-                            new_fragments.append(('fg:#D97757', '│   '))
+                            new_fragments.append(('fg:white', '│   '))
                             current_line_len = 0
                             continue
                             
@@ -195,9 +195,9 @@ class InputHandler:
                             pad = W - current_line_len
                             if pad > 0:
                                 new_fragments.append(('', ' ' * pad))
-                            new_fragments.append(('fg:#D97757', '│'))
+                            new_fragments.append(('fg:white', '│'))
                             new_fragments.append(('', ' ' * (term_width - width)))
-                            new_fragments.append(('fg:#D97757', '│   '))
+                            new_fragments.append(('fg:white', '│   '))
                             current_line_len = 0
                             
                         new_fragments.append((style, char))
@@ -206,7 +206,7 @@ class InputHandler:
                 pad = W - current_line_len
                 if pad > 0:
                     new_fragments.append(('', ' ' * pad))
-                new_fragments.append(('fg:#D97757', '│'))
+                new_fragments.append(('fg:white', '│'))
                 
                 if ti.lineno == ti.document.line_count - 1:
                     new_fragments.append(('', ' ' * (term_width - width)))
@@ -214,7 +214,7 @@ class InputHandler:
                     bottom_len = width
                     if bottom_len > 2:
                         current_bottom = "╰" + "─" * (bottom_len - 2) + "╯"
-                        new_fragments.append(('fg:#D97757', current_bottom))
+                        new_fragments.append(('fg:white', current_bottom))
                         
                     new_fragments.append(('', ' ' * (term_width - width)))
                     mode_sym = {"code": "⏵ code", "auto": "⏵⏵ auto", "plan": "⏸ plan"}[handler.modes[handler.mode_index]]
@@ -227,7 +227,7 @@ class InputHandler:
                     bar = "█" * filled_len + "░" * (bar_len - filled_len)
                     
                     pct_str = f"{model_name}: ctx [{bar}] {pct:.0f}% ({tokens}/{max_tokens})"
-                    pct_style = 'fg:red' if pct >= 80 else ('fg:#D97757' if pct >= 50 else 'fg:gray')
+                    pct_style = 'fg:red' if pct >= 80 else ('fg:white' if pct >= 50 else 'fg:gray')
                     
                     status_left = f"  {mode_sym} · vulkan · {think_name} · "
                     new_fragments.append(('fg:gray', status_left))
@@ -280,7 +280,7 @@ class InputHandler:
             if lines:
                 prompt_str += "\n".join(lines) + "\n"
                 
-            prompt_str += f"<style fg='#D97757'>{top}</style>\n<style fg='#D97757'>│ </style><b>&gt; </b>"
+            prompt_str += f"<style fg='white'>{top}</style>\n<style fg='white'>│ </style><b>&gt; </b>"
             return HTML(prompt_str)
             
         def get_continuation(width, line_number, is_soft_wrap):
@@ -301,7 +301,7 @@ class InputHandler:
             return "/quit"
         except Exception as e:
             if type(e).__name__ == "NoConsoleScreenBufferError":
-                print("\n[Ostrzeżenie: Środowisko nie posiada pełnego bufora konsoli (częste w terminalach IDE). Używam trybu uproszczonego]")
+                print("\n[Warning: Environment lacks full console buffer support (common in IDE terminals). Using simplified mode]")
                 return input("> ")
             raise
             

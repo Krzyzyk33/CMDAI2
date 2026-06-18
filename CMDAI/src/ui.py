@@ -6,8 +6,8 @@ from rich.live import Live
 import time
 import sys
 console = Console()
-ACCENT_COLOR = "#D97757"  
-ACCENT_COLOR = "white"  
+# Theme Colors (from Claude Code style)
+ACCENT_COLOR = "white"  # White
 MUTED_COLOR = "gray50"
 SUCCESS_COLOR = "green"
 ERROR_COLOR = "red"
@@ -27,17 +27,17 @@ def print_agent_msg(msg: str):
 def print_tool_call(tool_name: str, arg_summary: str):
     name_lower = tool_name.lower()
     if name_lower in ["read_file", "read"]:
-        console.print(f"\n[bold]● Odczyt: {arg_summary}[/bold]")
+        console.print(f"\n[bold]● Read: {arg_summary}[/bold]")
     elif name_lower in ["edit_file", "edit"]:
-        console.print(f"\n[bold]● Edycja: {arg_summary}[/bold]")
+        console.print(f"\n[bold]● Edit: {arg_summary}[/bold]")
     elif name_lower in ["write_file", "create_file", "write", "create"]:
-        console.print(f"\n[bold]● Nowy plik: {arg_summary}[/bold]")
+        console.print(f"\n[bold]● New file: {arg_summary}[/bold]")
     elif name_lower == "todo_write":
-        console.print(f"\n[bold]● Plan zadań[/bold]")
+        console.print(f"\n[bold]● Task Plan[/bold]")
     elif name_lower == "bash":
-        console.print(f"\n[bold]● Komenda: {arg_summary}[/bold]")
+        console.print(f"\n[bold]● Command: {arg_summary}[/bold]")
     elif name_lower == "run_python":
-        console.print(f"\n[bold]● Skrypt (Python): {arg_summary}[/bold]")
+        console.print(f"\n[bold]● Python Script: {arg_summary}[/bold]")
     elif name_lower == "delete_file":
         console.print(f"\n[bold]● Usunięcie: {arg_summary}[/bold]")
     else:
@@ -91,17 +91,17 @@ class ThinkingTree:
         self.spinner_frames = ["⌬", "✻"]
         self.frame_idx = 0
         self.fake_thoughts = [
-            "Analizuję polecenie i kontekst...",
-            "Weryfikuję dostępne narzędzia systemowe...",
-            "Projektuję architekturę rozwiązania...",
-            "Generuję kod w pamięci...",
-            "Optymalizuję i formatuję bloki...",
-            "Przesyłam gotowe dane..."
+            "Analyzing prompt and context...",
+            "Verifying available system tools...",
+            "Designing solution architecture...",
+            "Checking syntax and dependencies...",
+            "Optimizing logic...",
+            "Preparing code implementation..."
         ]
         self.fake_added = 0
         
         self.start_time = time.time()
-        self.live = Live(get_renderable=self.render, refresh_per_second=5, transient=True)
+        self.live = Live(get_renderable=self.render, refresh_per_second=5, transient=False)
         
     def start(self):
         self.start_time = time.time()
@@ -142,7 +142,10 @@ class ThinkingTree:
             for line in self.lines:
                 spaces = len(line) - len(line.lstrip())
                 indent = " " * spaces
-                t.append(f"{indent}  |_ {line.strip()}\n", style="gray50")
+                clean_line = line.strip()
+                if clean_line.startswith("|_"):
+                    clean_line = clean_line[2:].strip()
+                t.append(f"{indent}  |_ {clean_line}\n", style="gray50")
         return t
         
     def update(self):
@@ -160,7 +163,10 @@ class ThinkingTree:
             for line in self.lines:
                 spaces = len(line) - len(line.lstrip())
                 indent = " " * spaces
-                console.print(f"{indent}  [{MUTED_COLOR}]|_ {line.strip()}[/]")
+                clean_line = line.strip()
+                if clean_line.startswith("|_"):
+                    clean_line = clean_line[2:].strip()
+                console.print(f"{indent}  [{MUTED_COLOR}]|_ {clean_line}[/]")
         console.print("")
 def print_turn_done(elapsed: float, tokens: int, tool_count: int):
     t_str = f"{tokens/1000:.1f}k" if tokens > 1000 else str(tokens)

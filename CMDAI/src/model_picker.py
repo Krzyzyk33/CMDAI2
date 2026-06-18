@@ -106,17 +106,14 @@ def run_model_picker(state):
         p = m.get('provider')
         if p: return p.upper()
         url = m.get('base_url', '')
-        if 'nvidia' in url: return 'NVIDIA'
-        if 'groq' in url: return 'GROQ'
-        if 'openrouter' in url: return 'OPENROUTER'
-        if 'cerebras' in url: return 'CEREBRAS'
-        return 'OPENAI'
+        from .providers import detect_provider_by_url
+        return detect_provider_by_url(url).upper()
         
-    tabs = ["Ustawienia", "Lokalne modele", "Modele API"]
+    tabs = ["Settings", "Local Models", "API Models"]
     options = {
-        0: ["Dodaj model", "Dodaj klucz API", "Edytuj modele", "Wyjdź"],
-        1: local_models if local_models else ["Brak modeli lokalnych"],
-        2: [f"{m['name']} [{get_prov(m)}]" for m in api_models] if api_models else ["Brak modeli API"]
+        0: ["Add model", "Add API key", "Edit API keys", "Edit models", "Exit"],
+        1: local_models if local_models else ["No local models"],
+        2: [f"{m['name']} [{get_prov(m)}]" for m in api_models] if api_models else ["No API models"]
     }
     
     res = create_picker_app(tabs, options, start_tab=1)
@@ -125,17 +122,21 @@ def run_model_picker(state):
     if res["action"] == "select":
         tab = res["tab"]
         val = res["value"]
-        if tab == "Ustawienia":
-            if val == "Dodaj model":
+        if tab == "Settings":
+            if val == "Add model":
                 out["action"] = "add_model"
-            elif val == "Dodaj klucz API":
+            elif val == "Add API key":
                 out["action"] = "add_api"
-        elif tab == "Lokalne modele":
-            if val != "Brak modeli lokalnych":
+            elif val == "Edit API keys":
+                out["action"] = "edit_api"
+            elif val == "Edit models":
+                out["action"] = "edit_models"
+        elif tab == "Local Models":
+            if val != "No local models":
                 out["action"] = "load_local"
                 out["value"] = os.path.join(models_dir, val)
-        elif tab == "Modele API":
-            if val != "Brak modeli API":
+        elif tab == "API Models":
+            if val != "No API models":
                 out["action"] = "load_api"
                 for m in api_models:
                     if f"{m['name']} [{get_prov(m)}]" == val:
@@ -144,38 +145,25 @@ def run_model_picker(state):
     return out
 
 def run_provider_picker(mode="api"):
-    tabs = ["Nvidia NIM", "OpenAI", "OpenRouter", "Groq", "Cerebras"]
-    if mode == "api":
-        options = {
-            0: ["Wpisz klucz API", "Anuluj"],
-            1: ["Wpisz klucz API", "Anuluj"],
-            2: ["Wpisz klucz API", "Anuluj"],
-            3: ["Wpisz klucz API", "Anuluj"],
-            4: ["Wpisz klucz API", "Anuluj"]
-        }
-    else:
-        options = {
-            0: ["Wpisz nazwę modelu", "Anuluj"],
-            1: ["Wpisz nazwę modelu", "Anuluj"],
-            2: ["Wpisz nazwę modelu", "Anuluj"],
-            3: ["Wpisz nazwę modelu", "Anuluj"],
-            4: ["Wpisz nazwę modelu", "Anuluj"]
-        }
+    from .providers import get_all_providers
+    providers = get_all_providers()
+    tabs = [p.DISPLAY_NAME for p in providers]
+    
+    options = {}
+    for i in range(len(tabs)):
+        if mode == "api":
+            options[i] = ["Enter API key", "Cancel"]
+        else:
+            options[i] = ["Enter model name", "Cancel"]
         
     res = create_picker_app(tabs, options, start_tab=0)
     out = {"action": "cancel", "provider": None}
     
-    if res["action"] == "select" and res["value"] != "Anuluj":
+    if res["action"] == "select" and res["value"] != "Cancel":
         out["action"] = "continue"
-        if res["tab"] == "Nvidia NIM":
-            out["provider"] = "nvidia"
-        elif res["tab"] == "OpenAI":
-            out["provider"] = "openai"
-        elif res["tab"] == "OpenRouter":
-            out["provider"] = "openrouter"
-        elif res["tab"] == "Groq":
-            out["provider"] = "groq"
-        elif res["tab"] == "Cerebras":
-            out["provider"] = "cerebras"
+        for p in providers:
+            if p.DISPLAY_NAME == res["tab"]:
+                out["provider"] = p.PROVIDER_ID
+                break
             
     return out

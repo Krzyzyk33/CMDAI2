@@ -22,6 +22,10 @@ class Agent:
         import time
         from .ui import print_turn_done
         
+        # 8k Engine: Automatyczne zarządzanie rozmiarem kontekstu
+        if self.context.get_token_count() > 8000:
+            self.context.trigger_compaction(self.model)
+            
         self.context.add_user_message(user_msg)
         
         turn_start = time.time()
@@ -36,16 +40,18 @@ class Agent:
             level_idx = input_handler.thinking_idx
             
             if level_idx == 0:
-                thinking_desc = "You MUST wrap your thoughts inside <think> and </think> tags.\nTHINKING BEHAVIOR - LOW:\nNie generuj sekcji THINK. Przejdź od razu do ACTION lub odpowiedzi tekstowej.\nWyjątek: jeśli zadanie wymaga wyboru pliku/funkcji do edycji i nie jest to oczywiste z promptu użytkownika, napisz tylko:\n<think>\nROZUMIEM: <czego dotyczy zadanie>\nPLAN: <1 linia>\n</think>\n\nPo wykonaniu akcji NIE generuj THINK, niezależnie od wyniku.\nWyjątek: jeśli Bash zwrócił błąd, napisz 1 linię diagnozy w <think> i natychmiast zaproponuj poprawkę w kolejnym ACTION.\nNie wykonuj dodatkowych akcji 'na zapas' (build, search) jeśli użytkownik o to nie prosił."
+                thinking_desc = "IF you generate thoughts, you MUST wrap them inside <think> and </think> tags.\nTHINKING BEHAVIOR - LOW:\nDo not generate a THINK section. Proceed directly to ACTION or text response.\nException: if the task requires choosing a file/function to edit and it is not obvious from the user's prompt, write only:\n<think>\n  |_ UNDERSTAND: <what the task is about>\n  |_ PLAN: <1 line>\n  |_ NEXT_ACTION: <what you will do next, or 'none' if task is fully complete>\n</think>\n\nAfter performing an action, DO NOT generate THINK, regardless of the result.\nException: if Bash returned an error, write 1 line of diagnosis in <think> and immediately propose a fix in the next ACTION.\nDo not perform additional 'just in case' actions (build, search) unless the user asked for it.\nCRITICAL: ALWAYS respond to the user in their own language (e.g., Polish)."
             elif level_idx == 1:
-                thinking_desc = "You MUST wrap your thoughts inside <think> and </think> tags.\nTHINKING BEHAVIOR - MEDIUM:\nNa początku tury wygeneruj zwięzły THINK dokładnie wewnątrz tagów <think> i </think>:\n<think>\nROZUMIEM: <czego dotyczy zadanie>\nPLAN: <krótka lista kroków (max 3)>\n</think>\n\nNie generuj sub-drzew.\nPo wykonaniu akcji odczytu (Read/Search) NIE generuj THINK, chyba że wynik drastycznie różni się od oczekiwań.\nPo akcjach modyfikujących (Edit/Write/Bash) możesz wygenerować krótki THINK (1-2 linie), jeśli wymaga tego aktualizacja planu.\n\nWymuszone akcje: Wyszukaj wszystkich callerów po zmianie sygnatury funkcji (ACTION: Search). Nie wykonuj budowania projektu (build), dopóki użytkownik o to nie poprosi."
+                thinking_desc = "IF you generate thoughts, you MUST wrap them inside <think> and </think> tags.\nTHINKING BEHAVIOR - MEDIUM:\nAt the beginning of the turn, generate a concise THINK strictly inside <think> and </think> tags:\n<think>\n  |_ UNDERSTAND: <what the task is about>\n  |_ PLAN: <short list of steps (max 3)>\n  |_ NEXT_ACTION: <what you will do next, or 'none' if task is fully complete>\n</think>\n\nDo not generate sub-trees.\nAfter reading/searching, DO NOT generate THINK, unless the result differs drastically from expectations.\nAfter modifying actions (Edit/Write/Bash), you may generate a short THINK (1-2 lines) if the plan needs updating.\n\nForced actions: Search all callers after changing a function signature (ACTION: Search). Do not build the project unless requested.\nCRITICAL: ALWAYS respond to the user in their own language (e.g., Polish)."
             elif level_idx == 2:
-                thinking_desc = "You MUST wrap your thoughts inside <think> and </think> tags.\nTHINKING BEHAVIOR - HIGH:\nNa początku tury wygeneruj ustrukturyzowany THINK dokładnie wewnątrz tagów <think> i </think>:\n<think>\nROZUMIEM: <czego dotyczy zadanie>\nOPCJE: <opcja A> | <opcja B> (tylko dla złożonych lub niejednoznacznych problemów)\nWYBOR: <wybrana opcja + krótkie uzasadnienie>\nPLAN: <ponumerowana lista kroków>\n</think>\n\nStosuj sub-drzewa (wcięte listy) tylko w przypadku istotnych decyzji architektonicznych.\nPo kluczowych akcjach wygeneruj krótki THINK potwierdzający status:\n<think>\nPOTWIERDZENIE: <status + następny krok>\n</think>\n\nWymuszone akcje: ZAWSZE wyszukaj callerów po zmianie sygnatury funkcji. Po zakończeniu bloku powiązanych ze sobą edycji kodu - ZAWSZE uruchom build."
+                thinking_desc = "IF you generate thoughts, you MUST wrap them inside <think> and </think> tags.\nTHINKING BEHAVIOR - HIGH:\nAt the beginning of the turn, generate a structured THINK strictly inside <think> and </think> tags:\n<think>\n  |_ UNDERSTAND: <what the task is about>\n  |_ OPTIONS: <option A> | <option B> (only for complex or ambiguous problems)\n  |_ CHOICE: <chosen option + brief justification>\n  |_ PLAN: <numbered list of steps>\n  |_ NEXT_ACTION: <what you will do next, or 'none' if task is fully complete>\n</think>\n\nUse sub-trees (indented lists) only for significant architectural decisions.\nAfter key actions, generate a short THINK confirming status:\n<think>\n  |_ CONFIRMATION: <status + next step>\n  |_ NEXT_ACTION: <what you will do next, or 'none' if task is fully complete>\n</think>\n\nForced actions: ALWAYS search callers after changing a function signature. ALWAYS run a build after a block of related code edits.\nCRITICAL: ALWAYS respond to the user in their own language (e.g., Polish)."
             elif level_idx == 3:
-                thinking_desc = "You MUST wrap your thoughts inside <think> and </think> tags.\nTHINKING BEHAVIOR - ULTRA:\nNa początku KAŻDEJ tury wygeneruj THINK dokładnie wewnątrz tagów <think> i </think>:\n<think>\nROZUMIEM: <czego dotyczy zadanie>\nKONTEKST: <co już wiesz z dotychczasowych akcji>\nOPCJE: <opcja A> | <opcja B>\nWYBOR: <wybrana opcja + uzasadnienie>\nRYZYKO: <potencjalny problem + mitygacja>\nPLAN: <ponumerowana lista kroków>\n\nDla KAŻDEGO punktu PLAN, który ma więcej niż jeden sposób wykonania, rozpisz sub-drzewo:\n  - <punkt planu>\n    > opcja 1\n    > opcja 2\n    > wybór + uzasadnienie\n</think>\n\nPo KAŻDEJ akcji wygeneruj nowy THINK:\n<think>\nPOTWIERDZENIE: <czy wynik zgodny z oczekiwaniem? co dalej?>\n</think>\n\nWymuszone akcje: ZAWSZE wyszukaj callerów po zmianie sygnatury. ZAWSZE uruchom build po edycji kodu."
+                thinking_desc = "IF you generate thoughts, you MUST wrap them inside <think> and </think> tags.\nTHINKING BEHAVIOR - ULTRA:\nAt the beginning of EACH turn, generate a THINK strictly inside <think> and </think> tags:\n<think>\n  |_ UNDERSTAND: <what the task is about>\n  |_ CONTEXT: <what you already know from previous actions>\n  |_ OPTIONS: <option A> | <option B>\n  |_ CHOICE: <chosen option + justification>\n  |_ RISK: <potential problem + mitigation>\n  |_ PLAN: <numbered list of steps>\n\nFor EACH PLAN point that has more than one execution method, write a sub-tree:\n    |_ <plan point>\n      |_ > option 1\n      |_ > option 2\n      |_ > choice + justification\n  |_ NEXT_ACTION: <what you will do next, or 'none' if task is fully complete>\n</think>\n\nAfter EACH action, generate a new THINK:\n<think>\n  |_ CONFIRMATION: <did the result match expectations? what next?>\n  |_ NEXT_ACTION: <what you will do next, or 'none' if task is fully complete>\n</think>\n\nForced actions: ALWAYS search callers after changing a signature. ALWAYS run a build after editing code.\nCRITICAL: ALWAYS respond to the user in their own language (e.g., Polish)."
             elif level_idx == 4:
-                thinking_desc = "You MUST wrap your thoughts inside <think> and </think> tags.\nTHINKING BEHAVIOR - EXTREME:\nNa początku KAŻDEJ tury przeanalizuj cały projekt. Wygeneruj wyczerpujący THINK dokładnie wewnątrz tagów <think> i </think>:\n<think>\nROZUMIEM: <czego dotyczy zadanie w skali całego projektu>\nKONTEKST: <wnioski z logów, struktury plików i architektury>\nOPCJE: <rozbudowana lista opcji i ścieżek>\nWYBOR: <ostateczny wybór + wpływ na inne moduły>\nRYZYKO: <szczegółowa lista przypadków brzegowych, security i performance>\nPLAN: <bardzo szczegółowa lista kroków>\n\nDla KAŻDEGO punktu PLAN musisz rozpisać wielopoziomowe sub-drzewo. W pierwszej iteracji MUSISZ użyć narzędzia 'submit_plan'.\n</think>\n\nPo KAŻDEJ akcji wykonaj głęboką ewaluację:\n<think>\nEWALUACJA: <szczegółowa analiza zwróconego wyniku, diagnoza błędów, poprawki do planu>\n</think>\n\nWymuszone akcje: ZAWSZE wyszukaj wszystkie zależności. ZAWSZE uruchom build i testy jednostkowe po KAŻDEJ edycji pliku. Na końcu wykonaj procedurę re-walidacji."
+                thinking_desc = "IF you generate thoughts, you MUST wrap them inside <think> and </think> tags.\nTHINKING BEHAVIOR - EXTREME:\nAt the beginning of EACH turn, analyze the entire project. Generate an exhaustive THINK strictly inside <think> and </think> tags:\n<think>\n  |_ UNDERSTAND: <what the task is about on a project scale>\n  |_ CONTEXT: <conclusions from logs, file structures, and architecture>\n  |_ OPTIONS: <extensive list of options and paths>\n  |_ CHOICE: <final choice + impact on other modules>\n  |_ RISK: <detailed list of edge cases, security, and performance>\n  |_ PLAN: <very detailed list of steps>\n\nFor EACH PLAN point, you must write a multi-level sub-tree. In the first iteration, you MUST use the 'submit_plan' tool.\n  |_ NEXT_ACTION: <what you will do next, or 'none' if task is fully complete>\n</think>\n\nAfter EACH action, perform a deep evaluation:\n<think>\n  |_ EVALUATION: <detailed analysis of the returned result, error diagnosis, plan corrections>\n  |_ NEXT_ACTION: <what you will do next, or 'none' if task is fully complete>\n</think>\n\nForced actions: ALWAYS search all dependencies. ALWAYS run build and unit tests after EACH file edit. Perform a re-validation procedure at the end.\nCRITICAL: ALWAYS respond to the user in their own language (e.g., Polish)."
 
+            thinking_desc += f"\n\nCRITICAL: Your THINKING TOKEN BUDGET is exactly {level_info[1]} tokens. If you feel you have only 10% of your thinking capacity left, you MUST IMMEDIATELY stop planning, close the <think> block, and output the JSON tool call! Never run out of tokens before generating the tool.\nCRITICAL: NEVER write 'TOOL: None' unless you are absolutely 100% finished with the user's task and have no code left to write. If the user asks for code, you MUST use a tool (e.g. write_file)!\nCRITICAL: Writing 'TOOL: <name>' in your thought block is NOT enough. You MUST actually trigger the native JSON function calling mechanism immediately after closing the <think> block!"
+            
             messages = self.context.get_messages(self.get_tool_desc(), thinking_desc=thinking_desc)
             
             # Filtrowanie narzędzi
@@ -54,11 +60,12 @@ class Agent:
                 filtered_tools = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in allowed_tools]
             else:
                 disallowed_tools = ["save_plan"]
-                if level_idx == 4 and iteration == 1:
+                if level_idx >= 3 and iteration == 1:
                     allowed = ["read_file", "list_dir", "grep", "search_web", "submit_plan"]
                     filtered_tools = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] in allowed]
                 else:
-                    disallowed_tools.append("submit_plan")
+                    if level_idx < 3:
+                        disallowed_tools.append("submit_plan")
                     filtered_tools = [t for t in TOOLS_DEFINITIONS if t["function"]["name"] not in disallowed_tools]
             
             use_native_tools = (level_idx == 0)
@@ -101,8 +108,6 @@ class Agent:
                                 if chunk:
                                     if tree.live.is_started:
                                         tree.stop()
-                                        tree.print_tree()
-                                        tree_printed = True
                                         console.print() # nowa linia po drzewie
                                     import sys
                                     console.print(chunk, end="")
@@ -180,25 +185,34 @@ class Agent:
             # Self-Correction Loop for missing thinking, empty response or silent thinking
             if not full_content.strip() and not tool_calls:
                 if not full_thinking.strip():
-                    console.print("\n[yellow]⚠ Model wygenerował całkowicie pustą odpowiedź. Ponawiam próbę (self-correction)...[/yellow]")
-                    self.context.add_user_message("System Error: Zwróciłeś pustą odpowiedź. Pamiętaj o wygenerowaniu bloku <think> (jeśli wymagany) i podjęciu akcji lub udzieleniu odpowiedzi tekstowej.")
+                    console.print("\n[yellow]⚠️ Model generated completely empty response. Retrying (self-correction)...[/yellow]")
+                    self.context.add_user_message("System Error: You returned an empty response. Remember to generate a <think> block (if required) and take action or provide a text response.")
                 else:
-                    console.print("\n[yellow]⚠ Model wygenerował tylko myślenie, ale nie podjął akcji. Ponawiam próbę (self-correction)...[/yellow]")
-                    self.context.add_user_message("System Error: Wygenerowałeś blok <think>, ale nie użyłeś narzędzia ani nie napisałeś żadnej widocznej odpowiedzi poza myśleniem. Użyj narzędzia lub powiedz coś.")
+                    console.print("\n[yellow]⚠️ Model only generated thinking but took no action (likely hit token limit). Retrying (self-correction)...[/yellow]")
+                    self.context.add_user_message("System Error: You generated a very long <think> block and stopped abruptly, likely hitting the max token limit. You MUST now use a tool (e.g. write_file) immediately to continue your work! Limit your thinking to 1 sentence and output the tool call.")
                 continue
 
             if level_idx > 0 and not full_thinking.strip() and not ("<think>" in full_content):
-                console.print("\n[yellow]⚠ Model zignorował obowiązek myślenia. Ponawiam próbę (self-correction)...[/yellow]")
+                console.print("\n[yellow]⚠️ Model ignored the thinking requirement. Retrying (self-correction)...[/yellow]")
                 self.context.add_assistant_message(full_content)
-                self.context.add_user_message("System Error: Złamałeś zasady. Musisz wygenerować blok <think>...</think> z analizą przed użyciem narzędzia lub przesłaniem odpowiedzi. Spróbuj ponownie.")
+                self.context.add_user_message("System Error: You broke the rules. You must generate a <think>...</think> block with analysis before using a tool or sending a response. Try again.")
                 continue
 
-            if not tree_printed:
-                tree.print_tree()
+            # if not tree_printed:
+            #    tree.print_tree()
 
             if not tool_calls:
+                import re
+                tool_match = re.search(r"NEXT_ACTION:\s*(.*)", full_thinking, re.IGNORECASE)
+                if tool_match and tool_match.group(1).strip().lower() != "none" and tool_match.group(1).strip().lower() != "'none'":
+                    action_text = tool_match.group(1).strip()
+                    console.print(f"\n[yellow]⚠️ Model planned next action: '{action_text}' but failed to invoke a tool. Retrying (self-correction)...[/yellow]")
+                    self.context.add_assistant_message(full_content)
+                    self.context.add_user_message(f"System Error: You planned the following action in your thinking block: '{action_text}', but you FAILED to output any JSON function call payload. You MUST output the appropriate native JSON tool call now to execute this action.")
+                    continue
+                    
                 if not full_content:
-                    console.print("[gray50](Model nie wygenerował odpowiedzi)[/]")
+                    console.print("[gray50](Model did not generate a response)[/]")
                 self.context.add_assistant_message(full_content)
                 break
                 
@@ -214,15 +228,21 @@ class Agent:
                 self.last_tool_sig = sig
                 
             if self.consecutive_identical_calls >= 2:
-                console.print("\n[red]⚠ Zatrzymano automatyczne wywołania: Wykryto pętlę (model 3 razy powtórzył to samo, błędne narzędzie).[/red]")
-                self.context.add_user_message("System: Przestań używać tego narzędzia, utknąłeś w pętli. Przeanalizuj błąd i powiedz mi, co nie działa, lub poproś o wskazówki.")
+                console.print("\n[red]⚠️ Auto-execution stopped: Loop detected (model repeated the same faulty tool 3 times).[/red]")
+                self.context.add_user_message("System: Stop using this tool, you are stuck in a loop. Analyze the error and tell me what is not working, or ask for guidance.")
                 break
                 
             # Handle tool calls
             for tc in tool_calls:
                 func = tc["function"]
-                name = func["name"]
+                name = func.get("name", "")
                 args_str = func.get("arguments", "{}")
+                
+                if not name:
+                    console.print("\n[red]⚠️ Przerwane wywołanie narzędzia (ucięte przez limit tokenów).[/red]")
+                    self.context.add_tool_message(tc.get("id", "unknown"), "unknown", "System Error: Your tool call was incomplete because you hit the max_tokens limit. Keep your thinking block much shorter and try again.")
+                    continue
+                    
                 if isinstance(args_str, dict):
                     args = args_str
                     args_str = json.dumps(args)
@@ -285,8 +305,8 @@ class Agent:
                                     break
                                     
                         if not cmd_str:
-                            err_msg = "System Error: Zwróciłeś puste polecenie. Musisz podać treść komendy w argumencie 'command'."
-                            print_tool_result("Pusta komenda - odrzucono automatycznie")
+                            err_msg = "System Error: You returned an empty command. You must provide the command in the 'command' argument."
+                            print_tool_result("Empty command - auto-rejected")
                             self.context.add_tool_message(tc["id"], name, err_msg)
                             continue
                         print_code_panel("Terminal", cmd_str, lexer_override="bash")
@@ -313,11 +333,11 @@ class Agent:
                         import questionary
                         try:
                             choice = questionary.select(
-                                "Akcja wymaga zatwierdzenia:",
+                                "Action requires approval:",
                                 choices=[
-                                    questionary.Choice("Zatwierdź (y)", value="y"),
-                                    questionary.Choice("Odrzuć (n)", value="n"),
-                                    questionary.Choice("Zawsze zezwalaj (a)", value="a")
+                                    questionary.Choice("Approve (y)", value="y"),
+                                    questionary.Choice("Reject (n)", value="n"),
+                                    questionary.Choice("Always allow (a)", value="a")
                                 ]
                             ).ask()
                         except Exception:
@@ -332,13 +352,13 @@ class Agent:
                                 pass
                                 
                     if ans == "n":
-                        reason = input("  ⎿  Podaj powód odrzucenia (opcjonalnie): ").strip()
+                        reason = input("  ❯ Enter reason for rejection (optional): ").strip()
                         if reason:
                             result = f"User rejected the operation. Reason: {reason}\nPlease rethink and try a different approach."
                         else:
                             result = "User rejected the operation. Please rethink and try a different approach."
                         if spinner: spinner.stop("Rejected")
-                        else: print_tool_result("Odrzucono. Model spróbuje ponownie.")
+                        else: print_tool_result("Rejected. Model will try again.")
                     else:
                         result = execute_tool(name, args, restricted_dir=os.getcwd() if getattr(self.context, 'ide_mode', False) else None)
                         
@@ -352,10 +372,10 @@ class Agent:
                         elif name == "edit_file":
                             added = len(args.get("new_str", "").splitlines())
                             removed = len(args.get("old_str", "").splitlines())
-                            print_tool_result(f"Zmieniono {args.get('path', 'file')} ([green]+{added}[/] / [red]-{removed}[/])")
+                            print_tool_result(f"Edited {args.get('path', 'file')} ([green]+{added}[/] / [red]-{removed}[/])")
                         elif name in ["write_file", "create_file"]:
                             added = len(args.get("content", "").splitlines())
-                            print_tool_result(f"Utworzono/Nadpisano {args.get('path', 'file')} ({added} linii)")
+                            print_tool_result(f"Created/Overwritten {args.get('path', 'file')} ({added} lines)")
                         elif name == "bash":
                             if "Exit code: 0" in str(result):
                                 print_tool_result("Command successful")

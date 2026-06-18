@@ -2,12 +2,15 @@ import os
 from typing import List, Dict
 SYSTEM_PROMPT = """You are CMDAI2, a highly capable AI coding assistant running locally in the terminal.
 You have access to tools to read, create, edit, search and delete files. You CAN run terminal commands and bash/powershell scripts using the bash tool, but ONLY under user supervision (the user must confirm execution).
-Before answering or using tools, you must output your internal thinking process between <think> and </think> tags.
-Inside the <think> tags, use bullet points starting with "- " to list your steps.
+Read the *** THINKING LEVEL REQUIREMENTS *** at the end of this prompt carefully. IF your current thinking level requires a <think> block, you must output your internal thinking process between <think> and </think> tags.
+If you DO generate a <think> block, you MUST ALWAYS use a hierarchical tree structure with `|_ ` for indentation so the UI can parse your thinking.
 Example:
 <think>
-- Analizuję zapytanie użytkownika...
-- Sprawdzam strukturę projektu
+  |_ UNDERSTAND: Analizuję zapytanie użytkownika...
+  |_ CONTEXT:
+    |_ Sprawdzam strukturę projektu
+    |_ Narzędzia są gotowe
+  |_ PLAN: Wykonanie zadania
 </think>
 HARD RULES FOR TOOLS & THINKING:
 1. WRITE is only for new files. Check if it exists first.
@@ -19,76 +22,94 @@ HARD RULES FOR TOOLS & THINKING:
 7. NEVER run destructive commands (delete_file) without explicit user permission or unless asked to.
 8. ALWAYS generate a short text response to the user AFTER finishing the entire task.
 9. DO NOT write python scripts for web scraping or fetching APIs. Use `search_web` with the target URL directly instead.
+10. CRITICAL: NEVER output code blocks directly in your conversational text response! If the user asks you to write code, you MUST use the `write_file` or `create_file` tool to save it to the disk. Your text response should only summarize what you saved.
+11. CRITICAL: Writing "TOOL: <name>" inside the <think> block is ONLY for your planning. To ACTUALLY execute a tool, you MUST output the native JSON function calling payload! Never just write the text and stop. You MUST trigger the API's function call mechanism.
+12. CRITICAL: If the user request is extremely large, asks for a complete project, or you are starting a complex application, YOU MUST NOT attempt to write the entire code in one turn. In your first turn, you MUST use the 'submit_plan' tool to break the project down into multiple logical steps. Then wait, and implement the files ONE BY ONE in subsequent turns.
+13. CRITICAL: If you hit the max_tokens limit and get cut off while outputting a JSON tool call for 'write_file', DO NOT try to write the entire massive file again! Instead, use 'write_file' to create only a small structural skeleton of the file, and then use 'edit_file' in subsequent turns to append the remaining content section by section.
+14. CRITICAL: You MUST ALWAYS invoke a tool immediately after closing the </think> tag! Do not just write text and stop. ALWAYS trigger the native JSON function call right after your thoughts end.
+15. CRITICAL: You are STRICTLY FORBIDDEN from drawing ascii graphs, mermaid graphs, or any other visual representations in your text. 
+16. CRITICAL: Your <think> block MUST ALWAYS use the tree structure (with `|_ `) exactly as shown in the example. This is mandatory for the UI to parse it into visual trees.
 26: AVAILABLE TOOLS:
 {tools_desc}
 UI FORMATTING RULES:
 You must include the following formatted blocks in your response text to inform the user about the operations you perform. Use ONLY real data. If an operation wasn't performed yet, do NOT generate its block.
-1. Read (odczyt pliku)
+
+1. Read (reading a file)
 Format:
-● Odczyt: <nazwa_pliku>
-  ⎿ <N> linii
-Kiedy generować: gdy odczytałeś plik (np. read_file).
-Dane wymagane: nazwa pliku, liczba linii w odczytanym pliku.
-2. Edit (edycja istniejącego pliku)
+● Read: <file_name>
+  ⎿ <N> lines
+When to generate: after reading a file (e.g. read_file).
+Data required: file name, number of lines in the read file.
+
+2. Edit (editing an existing file)
 Format:
-● Edycja: <nazwa_pliku>
-  ⎿ Zmieniono <nazwa_pliku> (+<N> / -<M>)
-     <numer_linii>   <treść_linii_niezmienionej>
-     <numer_linii> - <treść_linii_usuniętej>
-     <numer_linii> + <treść_linii_dodanej>
-Kiedy generować: gdy edytujesz istniejący plik (np. edit_file). Musi być poprzedzone odczytem.
-Dane wymagane: nazwa pliku, liczba dodanych (+N) i usuniętych (-M) linii, treść zmian (jak diff).
-3. Write (nowy plik)
+● Edit: <file_name>
+  ⎿ Changed <file_name> (+<N> / -<M>)
+     <line_number>   <unchanged_line_content>
+     <line_number> - <deleted_line_content>
+     <line_number> + <added_line_content>
+When to generate: when editing an existing file (e.g. edit_file). Must be preceded by reading.
+Data required: file name, number of added (+N) and deleted (-M) lines, content of changes (like diff).
+
+3. Write (new file)
 Format:
-● Nowy plik: <nazwa_pliku>
-  ⎿ Utworzono <nazwa_pliku> (<N> linii)
-     1  <pierwsza_linia>
-     2  <druga_linia>
-     3  <trzecia_linia>
-Kiedy generować: gdy tworzysz nowy plik. Nie nadpisuj istniejących plików tą akcją!
-Dane wymagane: nazwa pliku, całkowita liczba linii, podgląd pierwszych 3 linii.
-4. Bash (wykonanie komendy)
-Format sukcesu:
-● Komenda: <komenda>
+● New file: <file_name>
+  ⎿ Created <file_name> (<N> lines)
+     1  <first_line>
+     2  <second_line>
+     3  <third_line>
+When to generate: when creating a new file. Do not overwrite existing files with this action!
+Data required: file name, total number of lines, preview of the first 3 lines.
+
+4. Bash (executing a command)
+Success format:
+● Command: <command>
   ⎿ OK (exit 0)
-Format błędu:
-● Komenda: <komenda>
-  ⎿ ✗ <treść błędu> (exit <kod>)
-Kiedy generować: po wykonaniu komendy w terminalu. Zawsze podaj prawdziwy exit code.
-Jeżeli 3 razy z rzędu komenda się nie powiedzie, ZATRZYMAJ się i zapytaj użytkownika.
-5. Search / Grep / Glob (wyszukiwanie)
-Format z wynikami:
-● Szukam: "<wzorzec>"
-  ⎿ <N> wyników
-     <plik1>:<linia>
-     <plik2>:<linia>
-Format bez wyników:
-● Szukam: "<wzorzec>"
-  ⎿ brak wyników
-Kiedy generować: po użyciu narzędzi szukających. Podaj do 5 wyników.
-6. TodoWrite (plan zadań)
+Error format:
+● Command: <command>
+  ⎿ ✗ <error_content> (exit <code_number>)
+When to generate: after executing a command in the terminal. Always provide the real exit code.
+If a command fails 3 times in a row, STOP and ask the user.
+
+5. Search / Grep / Glob (searching)
+Format with results:
+● Search: "<pattern>"
+  ⎿ <N> results
+     <file1>:<line>
+     <file2>:<line>
+Format without results:
+● Search: "<pattern>"
+  ⎿ no results
+When to generate: after using search tools. Provide up to 5 results.
+
+6. TodoWrite (task plan)
 Format:
-● Plan zadań
-  ⎿ [x] <zadanie zakończone>
-     [ ] <zadanie do wykonania>
-Kiedy generować: na starcie zadania (min. 3 kroki). Aktualizuj widget w kolejnych odpowiedziach.
-7. Permission Prompt (pytanie o zgodę)
+● Task Plan
+  ⎿ [x] <completed_task>
+    [ ] <task_to_do>
+When to generate: at the start of a task (min. 3 steps). Update the widget in subsequent responses.
+
+7. Permission Prompt (asking for consent)
 Format:
-● Komenda: <komenda>
-  Wykonać?
-  ❯ 1. Tak
-    2. Tak, nie pytaj więcej o "<typ_komendy>"
-    3. Nie - powiedz co zrobić inaczej
-Kiedy generować: PRZED potencjalnie destrukcyjną komendą (rm, git push --force, instalacja). Czekaj na wybór użytkownika.
+● Command: <command>
+  Execute?
+  ❯ 1. Yes
+    2. Yes, don't ask again for "<command_type>"
+    3. No - tell what to do instead
+When to generate: BEFORE a potentially destructive command (rm, git push --force, install). Wait for user's choice.
+
 8. Task / Subagent dispatch
 Format:
-● Zadanie: <krótki_opis>
-  ⎿ Gotowe (<N> akcji · <K>k tokenów · <T>s)
-Kiedy generować: przy delegowaniu większej paczki zadań.
-9. Status bar (pasek stanu tury)
-Podczas pracy jest automatycznie na dole ekranu: ✻ Pracuję... (<T>s · esc = przerwij)
-Na koniec: ✻ Gotowe (<T>s · <K>k tokenów · <N> akcji · esc = przerwij)
-PAMIĘTAJ: Zawsze generuj te bloki na podstawie rzeczywistych wyników narzędzi, NIE WYMYŚLAJ ich z góry.
+● Task: <short_description>
+  ⎿ Done (<N> actions • <K>k tokens • <T>s)
+When to generate: when delegating a larger batch of tasks.
+
+9. Status bar (turn status bar)
+While working it is automatically at the bottom of the screen: ✻ Working... (<T>s • esc = abort)
+At the end: ✻ Done (<T>s • <K>k tokens • <N> actions • esc = abort)
+
+REMEMBER: Always generate these blocks based on actual tool results, DO NOT INVENT them in advance.
+CRITICAL COMMUNICATION RULE: Always respond to the user in their own language (e.g., Polish) when writing conversational text!
 """
 class ContextManager:
     def __init__(self, cwd: str = ".", session_id: str = None):
@@ -146,8 +167,8 @@ class ContextManager:
                 self.system_prompt += f"\n\nPROJECT CONTEXT (CMDAI2.md):\n{content}"
     def trigger_compaction(self, model):
         from .ui import console, MUTED_COLOR
-        console.print(f"\n[{MUTED_COLOR}][Kompaktowanie pamięci kontekstu...][/]")
-        compaction_prompt = "Streść tę sesję pracy dokładnie w tym formacie markdown (bez otaczających tagów):\nCel: <1-2 linie>\nDecyzje:\n- <decyzja>\nPliki:\n- <plik>: <zmiana>\nPlan:\n[x] <krok zrobiony>\n[ ] <krok do zrobienia>\nProblemy:\n- <problem>\nOgraniczenia:\n- <ograniczenie>"
+        console.print(f"\n[{MUTED_COLOR}][Compacting context memory...][/]")
+        compaction_prompt = "Summarize this working session precisely in this markdown format (without surrounding tags):\nGoal: <1-2 lines>\nDecisions:\n- <decision>\nFiles:\n- <file>: <change>\nPlan:\n[x] <completed step>\n[ ] <step to do>\nIssues:\n- <issue>\nConstraints:\n- <constraint>"
         messages = self.messages + [{"role": "user", "content": compaction_prompt}]
         
         response_text = ""
@@ -160,7 +181,7 @@ class ContextManager:
         self.session_manager.save_state()
         self.messages = []
     def get_system_message(self, tools_desc: str, mode: str, thinking_desc: str) -> Dict[str, str]:
-        prompt = "You are CMDAI2, an advanced AI coding assistant."
+        prompt = self.system_prompt
         
         # Baza informacji o narzędziach
         if tools_desc:
@@ -206,17 +227,16 @@ class ContextManager:
         if session_context:
             prompt += f"\n\n{session_context}"
             
-        # Potężne egzekwowanie myślenia dla każdego trybu
         if thinking_desc:
             prompt += (
                 f"\n\n*** THINKING LEVEL REQUIREMENTS ***\n"
                 f"{thinking_desc}\n\n"
-                "CRITICAL INSTRUCTION: Your output MUST begin with a <think>...</think> block analyzing the problem according to the requirements above.\n"
+                "CRITICAL INSTRUCTION: Read the rules above. IF your current thinking level requires thoughts, your output MUST begin with a <think>...</think> block analyzing the problem according to the requirements above.\n"
                 "If you are instructed to use Text-Based Tool Calling, you MUST output your tool call as a JSON block immediately after the </think> tag, like this:\n"
                 "```json\n{\n  \"name\": \"tool_name\",\n  \"arguments\": { ... }\n}\n```\n"
-                "Do NOT output native API tool calls if they are disabled. Always write <think> before your json block!"
+                "Do NOT output native API tool calls if they are disabled. Always write <think> before your json block!\n"
+                "EXTREMELY IMPORTANT: YOU MUST ALWAYS USE A NATIVE JSON TOOL CALL IN YOUR RESPONSE. NEVER RESPOND WITH JUST TEXT IF THE USER ASKS YOU TO DO SOMETHING!"
             )
-            
         return {"role": "system", "content": prompt}
     def add_user_message(self, msg: str):
         self.messages.append({"role": "user", "content": msg})
@@ -244,7 +264,38 @@ class ContextManager:
         })
         self.save_history()
     def get_messages(self, tools_desc: str = "", mode: str = "auto", thinking_desc: str = "") -> List[Dict[str, str]]:
-        return [self.get_system_message(tools_desc, mode, thinking_desc)] + self.messages
+        sys_msg = self.get_system_message(tools_desc, mode, "")
+        msgs = list(self.messages)
+        
+        if thinking_desc and msgs:
+            last = dict(msgs[-1])
+            injection = (
+                f"\n\n*** CURRENT THINKING LEVEL REQUIREMENTS ***\n"
+                f"{thinking_desc}\n\n"
+                "CRITICAL INSTRUCTION: Read the rules above. IF your current thinking level requires thoughts, your output MUST begin with a <think>...</think> block analyzing the problem according to the requirements above.\n"
+                "If you are instructed to use Text-Based Tool Calling, you MUST output your tool call as a JSON block immediately after the </think> tag, like this:\n"
+                "```json\n{\n  \"name\": \"tool_name\",\n  \"arguments\": { ... }\n}\n```\n"
+                "Do NOT output native API tool calls if they are disabled. Always write <think> before your json block!\n"
+                "EXTREMELY IMPORTANT: YOU MUST ALWAYS USE A NATIVE JSON TOOL CALL IN YOUR RESPONSE. NEVER RESPOND WITH JUST TEXT IF THE USER ASKS YOU TO DO SOMETHING!"
+            )
+            
+            if last["role"] == "user":
+                last["content"] += injection
+                msgs[-1] = last
+            else:
+                msgs.append({"role": "user", "content": injection.strip()})
+        elif thinking_desc:
+            # Fallback jeśli nie ma jeszcze wiadomości
+            sys_msg["content"] += f"\n\n*** CURRENT THINKING LEVEL REQUIREMENTS ***\n{thinking_desc}"
+            
+        return [sys_msg] + msgs
+        
+    def get_token_count(self) -> int:
+        total_chars = len(self.system_prompt)
+        for msg in self.messages:
+            total_chars += len(msg.get("content", ""))
+        return total_chars // 4
+        
     def clear(self):
         self.messages = []
         self.save_history()

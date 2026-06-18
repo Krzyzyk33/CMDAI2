@@ -6,10 +6,15 @@ import os
 class OpenAIAPIModel:
     def __init__(self, model_name: str, api_key: str, base_url: str = "https://integrate.api.nvidia.com/v1"):
         self.model_name = model_name
-        self.client = OpenAI(
-            base_url=base_url,
-            api_key=api_key
-        )
+        
+        from src.providers import detect_provider_by_url, get_provider
+        provider_id = detect_provider_by_url(base_url)
+        self.provider_module = get_provider(provider_id)
+        
+        if self.provider_module and hasattr(self.provider_module, "get_client"):
+            self.client = self.provider_module.get_client(api_key)
+        else:
+            self.client = OpenAI(base_url=base_url, api_key=api_key)
         self.is_api = True
     def get_context_limit(self) -> int:
         return 10000000
@@ -26,25 +31,13 @@ class OpenAIAPIModel:
                 "model": self.model_name,
                 "messages": messages,
                 "temperature": 0.3,
-                "max_tokens": 8192,
+                "max_tokens": 100000,
                 "stream": True,
                 "timeout": 300.0
             }
             
-            if "nvidia.com" in str(self.client.base_url):
-                if reasoning_budget > 0:
-                    kwargs["extra_body"] = {
-                        "chat_template_kwargs": {
-                            "enable_thinking": True
-                        },
-                        "reasoning_budget": reasoning_budget
-                    }
-                else:
-                    kwargs["extra_body"] = {
-                        "chat_template_kwargs": {
-                            "enable_thinking": False
-                        }
-                    }
+            if hasattr(self, "provider_module") and self.provider_module and hasattr(self.provider_module, "modify_chat_kwargs"):
+                self.provider_module.modify_chat_kwargs(kwargs, reasoning_budget)
             if openai_tools:
                 kwargs["tools"] = openai_tools
             response = self.client.chat.completions.create(**kwargs)
@@ -105,9 +98,13 @@ class OpenAIAPIModel:
                             else:
                                 if "<" in content_buffer:
                                     last_lt = content_buffer.rfind("<")
-                                    yield content_buffer[:last_lt], "", None
-                                    content_buffer = content_buffer[last_lt:]
-                                    break
+                                    if len(content_buffer) - last_lt > 25:
+                                        yield content_buffer, "", None
+                                        content_buffer = ""
+                                    else:
+                                        yield content_buffer[:last_lt], "", None
+                                        content_buffer = content_buffer[last_lt:]
+                                        break
                                 else:
                                     yield content_buffer, "", None
                                     content_buffer = ""
@@ -133,9 +130,13 @@ class OpenAIAPIModel:
                             else:
                                 if "<" in content_buffer:
                                     last_lt = content_buffer.rfind("<")
-                                    yield "", content_buffer[:last_lt], None
-                                    content_buffer = content_buffer[last_lt:]
-                                    break
+                                    if len(content_buffer) - last_lt > 25:
+                                        yield "", content_buffer, None
+                                        content_buffer = ""
+                                    else:
+                                        yield "", content_buffer[:last_lt], None
+                                        content_buffer = content_buffer[last_lt:]
+                                        break
                                 else:
                                     yield "", content_buffer, None
                                     content_buffer = ""
