@@ -13,8 +13,19 @@ SUCCESS_COLOR = "green"
 ERROR_COLOR = "red"
 def print_header(model_name: str, cwd: str):
     from rich import box
+    import json, os
+    engine_short = "cpp"
+    state_file = os.path.expanduser("~/.cmdai2/state.json")
+    if os.path.exists(state_file):
+        try:
+            with open(state_file, "r", encoding="utf-8") as f:
+                st = json.load(f)
+            engine_short = st.get("llama_engine", "llama cpp").replace("llama ", "")
+        except:
+            pass
+            
     header_text = Text()
-    header_text.append(f"✻ CMDAI2  ·  {model_name}  ·  vulkan\n", style=ACCENT_COLOR)
+    header_text.append(f"✻ CMDAI2  ·  {model_name}  ·  {engine_short}\n", style=ACCENT_COLOR)
     header_text.append(f"cwd: {cwd}   /help · @plik · ⇧Tab", style=MUTED_COLOR)
     
     panel = Panel(header_text, border_style=ACCENT_COLOR, padding=(0, 2), box=box.ROUNDED)

@@ -229,83 +229,174 @@ def main():
             elif user_input == "/plan":
                 input_handler.mode_index = input_handler.modes.index("plan")
                 console.print("[green]Tryb zmieniony na: plan[/green]")
+            elif user_input == "/llama":
+                from .model_picker import create_picker_app
+                import importlib.util
+                import subprocess
+                
+                # Zabezpieczenie przed błędem
+                state = load_state()
+                current_engine = state.get("llama_engine", "llama cpp")
+                
+                installed = []
+                if importlib.util.find_spec("llama_cpp"):
+                    # Precyzyjna autodetekcja backendu wprost z biblioteki C++
+                    detected = False
+                    try:
+                        import io
+                        import llama_cpp
+                        
+                        fd = sys.stderr.fileno()
+                        old_stderr = os.dup(fd)
+                        
+                        capture_file = os.path.join(cwd, "stderr_capture.txt")
+                        with open(capture_file, "w") as f:
+                            os.dup2(f.fileno(), fd)
+                            llama_cpp.llama_print_system_info()
+                            
+                        os.dup2(old_stderr, fd)
+                        os.close(old_stderr)
+                        
+                        with open(capture_file, "r") as f:
+                            stderr_out = f.read().lower()
+                            
+                        try: os.remove(capture_file)
+                        except: pass
+                        
+                        if "vulkan" in stderr_out:
+                            installed.append("llama vulcan")
+                        else:
+                            installed.append("llama cpp")
+                        detected = True
+                    except:
+                        pass
+                        
+                    if not detected:
+                        if current_engine in ["llama cpp", "llama vulcan"]:
+                            installed.append(current_engine)
+                        else:
+                            installed.append("llama cpp")
+                        
+                if not installed:
+                    installed = ["Brak zainstalowanych silników"]
+                
+                tabs = ["Zainstalowane", "Instalacja"]
+                
+                available_to_install = [e for e in ["llama cpp", "llama vulcan"] if e not in installed]
+                if not available_to_install:
+                    available_to_install = ["Wszystko zainstalowane"]
+                    
+                options = {
+                    0: installed + ["Anuluj"],
+                    1: available_to_install + ["Anuluj"]
+                }
+                
+                res = create_picker_app(tabs, options, start_tab=0)
+                
+                if res["action"] == "select" and res["value"] not in ["Anuluj", "Brak zainstalowanych silników", "Wszystko zainstalowane"]:
+                    selected = res["value"]
+                    if res["tab"] == "Instalacja":
+                        console.print(f"\n[yellow]⏳ Rozpoczynam instalację silnika: {selected}...[/yellow]")
+                        
+                        cmd = ""
+                        if selected == "llama cpp":
+                            cmd = "pip install llama-cpp-python --force-reinstall --no-cache-dir"
+                        elif selected == "llama vulcan":
+                            if os.name == "nt":
+                                cmd = "set CMAKE_ARGS=-DGGML_VULCAN=1 && pip install llama-cpp-python --force-reinstall --no-cache-dir"
+                            else:
+                                cmd = 'CMAKE_ARGS="-DGGML_VULCAN=1" pip install llama-cpp-python --force-reinstall --no-cache-dir'
+                            
+                        if cmd:
+                            console.print(f"[cyan]Wykonywanie: {cmd}[/cyan]")
+                            subprocess.run(cmd, shell=True)
+                        
+                        state["llama_engine"] = selected
+                        save_state(state)
+                        console.print(f"[green]✅ Silnik Llama został zainstalowany i ustawiony na: {selected}[/green]")
+                        import time; time.sleep(2)
+                    elif res["tab"] == "Zainstalowane":
+                        state["llama_engine"] = selected
+                        save_state(state)
+                        console.print(f"[green]✅ Silnik Llama ustawiony na: {selected}[/green]")
+                        import time; time.sleep(1)
+                        
+                os.system("cls" if os.name == "nt" else "clear")
+                print_header(os.path.basename(model_path), cwd)
+                continue
             elif user_input == "/model":
                 from .model_picker import run_model_picker
-                state = load_state()
-                result = run_model_picker(state)
-                
-                if result["action"] == "add_api":
-                    from .model_picker import run_provider_picker
-                    sub_res = run_provider_picker(mode="api")
-                    if sub_res["action"] == "cancel":
-                        os.system("cls" if os.name == "nt" else "clear")
-                        print_header(os.path.basename(model_path), cwd)
+                while True:
+                    os.system("cls" if os.name == "nt" else "clear")
+                    state = load_state()
+                    result = run_model_picker(state)
+                    
+                    if result["action"] == "add_api":
+                        from .model_picker import run_provider_picker
+                        sub_res = run_provider_picker(mode="api")
+                        if sub_res["action"] == "cancel":
+                            continue
+                            
+                        provider = sub_res["provider"]
+                        api_key = console.input(f"\n[bold]Enter API key for {provider.upper()}: [/bold]")
+                        if api_key:
+                            if "api_keys" not in state:
+                                state["api_keys"] = {}
+                            state["api_keys"][provider] = api_key
+                            save_state(state)
+                            console.print(f"[green]Saved API key for {provider.upper()}.[/green]")
+                            import time; time.sleep(1)
                         continue
                         
-                    provider = sub_res["provider"]
-                    api_key = console.input(f"\n[bold]Enter API key for {provider.upper()}: [/bold]")
-                    if api_key:
-                        if "api_keys" not in state:
-                            state["api_keys"] = {}
-                        state["api_keys"][provider] = api_key
-                        save_state(state)
-                        console.print(f"[green]Saved API key for {provider.upper()}.[/green]")
-                        import time; time.sleep(1)
-                    os.system("cls" if os.name == "nt" else "clear")
-                    print_header(os.path.basename(model_path), cwd)
-                    continue
-                elif result["action"] == "edit_api":
-                    from .manager_ui import run_api_keys_manager
-                    run_api_keys_manager(state, save_state)
-                    os.system("cls" if os.name == "nt" else "clear")
-                    print_header(os.path.basename(model_path), cwd)
-                    continue
-                elif result["action"] == "edit_models":
-                    from .manager_ui import run_models_manager
-                    run_models_manager(state, save_state)
-                    os.system("cls" if os.name == "nt" else "clear")
-                    print_header(os.path.basename(model_path), cwd)
-                    continue
-                elif result["action"] == "add_model":
-                    from .model_picker import run_provider_picker
-                    sub_res = run_provider_picker(mode="model")
-                    if sub_res["action"] == "cancel":
-                        os.system("cls" if os.name == "nt" else "clear")
-                        print_header(os.path.basename(model_path), cwd)
+                    elif result["action"] == "edit_api":
+                        from .manager_ui import run_api_keys_manager
+                        run_api_keys_manager(state, save_state)
                         continue
                         
-                    provider = sub_res["provider"]
-                    api_keys = state.get("api_keys", {})
-                    if provider not in api_keys:
-                        console.print(f"\n[red]Missing API key for {provider.upper()}! Please select 'Add API key' first.[/red]")
-                        import time; time.sleep(2)
-                        os.system("cls" if os.name == "nt" else "clear")
-                        print_header(os.path.basename(model_path), cwd)
+                    elif result["action"] == "edit_models":
+                        from .manager_ui import run_models_manager
+                        run_models_manager(state, save_state)
                         continue
                         
-                    model_name = console.input(f"\n[bold]Podaj nazwę modelu dla {provider.upper()}: [/bold]")
-                    if model_name:
-                        from src.providers import get_provider
-                        provider_module = get_provider(provider)
-                        if provider_module:
-                            base_url = provider_module.BASE_URL
+                    elif result["action"] == "add_model":
+                        from .model_picker import run_provider_picker
+                        sub_res = run_provider_picker(mode="model")
+                        if sub_res["action"] == "cancel":
+                            continue
+                            
+                        provider = sub_res["provider"]
+                        api_keys = state.get("api_keys", {})
+                        if provider not in api_keys:
+                            console.print(f"\n[red]Missing API key for {provider.upper()}! Please select 'Add API key' first.[/red]")
+                            import time; time.sleep(2)
+                            continue
+                            
+                        model_name = console.input(f"\n[bold]Podaj nazwę modelu dla {provider.upper()}: [/bold]")
+                        if model_name:
+                            from src.providers import get_provider
+                            provider_module = get_provider(provider)
+                            if provider_module:
+                                base_url = provider_module.BASE_URL
+                            else:
+                                base_url = "https://api.openai.com/v1"
+                            new_api_model = {"name": model_name, "api_key": api_keys[provider], "base_url": base_url, "provider": provider}
+                            if "api_models" not in state:
+                                state["api_models"] = []
+                            state["api_models"].append(new_api_model)
+                            save_state(state)
+                            result["action"] = "load_api"
+                            result["value"] = new_api_model
+                            break
                         else:
-                            base_url = "https://api.openai.com/v1"
-                        new_api_model = {"name": model_name, "api_key": api_keys[provider], "base_url": base_url, "provider": provider}
-                        if "api_models" not in state:
-                            state["api_models"] = []
-                        state["api_models"].append(new_api_model)
-                        save_state(state)
-                        result["action"] = "load_api"
-                        result["value"] = new_api_model
-                    else:
-                        os.system("cls" if os.name == "nt" else "clear")
-                        print_header(os.path.basename(model_path), cwd)
-                        continue
-                        
+                            continue
+                            
+                    elif result["action"] in ["cancel", "load_local", "load_api"]:
+                        break
+
+                os.system("cls" if os.name == "nt" else "clear")
+                print_header(os.path.basename(model_path), cwd)
+                
                 if result["action"] == "cancel":
-                    os.system("cls" if os.name == "nt" else "clear")
-                    print_header(os.path.basename(model_path), cwd)
                     continue
                         
                 if result["action"] == "load_local":

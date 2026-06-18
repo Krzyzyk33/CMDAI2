@@ -8,6 +8,7 @@ from prompt_toolkit.shortcuts import CompleteStyle
 COMMANDS = {
     "/help": "display detailed instructions and available keyboard shortcuts",
     "/model": "switch the currently used artificial intelligence model to another one",
+    "/llama": "change the Llama engine (e.g. llama cpp, llama vulcan, llama diffusion)",
     "/clear": "clear the entire chat history and the console screen buffer",
     "/compact": "summarize the conversation so far to save tokens",
     "/init": "przeskanuj całe repozytorium i zbuduj bazę wiedzy o plikach",
@@ -156,6 +157,16 @@ class InputHandler:
         )
     def get_input(self, model_name: str = "model", tokens: int = 0, max_tokens: int = 32768) -> str:
         import shutil
+        import json, os
+        engine_short = "cpp"
+        state_file = os.path.expanduser("~/.cmdai2/state.json")
+        if os.path.exists(state_file):
+            try:
+                with open(state_file, "r", encoding="utf-8") as f:
+                    engine_short = json.load(f).get("llama_engine", "llama cpp").replace("llama ", "")
+            except:
+                pass
+                
         from prompt_toolkit.formatted_text import HTML
         from prompt_toolkit import print_formatted_text
         from prompt_toolkit.layout.processors import Processor, Transformation
@@ -229,7 +240,7 @@ class InputHandler:
                     pct_str = f"{model_name}: ctx [{bar}] {pct:.0f}% ({tokens}/{max_tokens})"
                     pct_style = 'fg:red' if pct >= 80 else ('fg:white' if pct >= 50 else 'fg:gray')
                     
-                    status_left = f"  {mode_sym} · vulkan · {think_name} · "
+                    status_left = f"  {mode_sym} ·  {engine_short} ·  {think_name} ·  "
                     new_fragments.append(('fg:gray', status_left))
                     new_fragments.append((pct_style, pct_str))
                     

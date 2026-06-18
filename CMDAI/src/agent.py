@@ -95,7 +95,24 @@ class Agent:
             tree_printed = False
             
             try:
+                esc_count = 0
+                import os
+                if os.name == "nt":
+                    import msvcrt
+                
                 for content, thinking, tc in stream:
+                    if os.name == "nt" and msvcrt.kbhit():
+                        while msvcrt.kbhit():
+                            key = msvcrt.getch()
+                            if key == b'\x1b':
+                                esc_count += 1
+                            else:
+                                esc_count = 0
+                        if esc_count >= 2:
+                            from rich.console import Console
+                            Console().print("\n\n[red bold][Generowanie przerwane przez klawisz ESC][/red bold]\n")
+                            break
+                            
                     if content:
                         full_content += content
                         if not tool_detected:

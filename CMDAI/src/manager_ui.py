@@ -1,5 +1,6 @@
 import questionary
 from rich.console import Console
+from .model_picker import create_picker_app
 
 console = Console()
 
@@ -7,88 +8,94 @@ def run_models_manager(state, save_callback):
     while True:
         api_models = state.get("api_models", [])
         if not api_models:
-            console.print("[yellow]Brak zapisanych modeli API.[/yellow]")
+            console.print("[yellow]No saved API models found.[/yellow]")
             import time; time.sleep(1.5)
             return
 
-        choices = []
+        tabs = ["Model Manager"]
+        options = []
         for i, m in enumerate(api_models):
-            choices.append(questionary.Choice(f"{m['name']} [{m.get('provider', 'unknown').upper()}]", value=i))
-        choices.append(questionary.Choice("Wr (Wróć)", value=-1))
+            options.append(f"{m['name']} [{m.get('provider', 'unknown').upper()}]")
+        options.append("Exit")
 
-        selected_idx = questionary.select(
-            "Zarządzanie modelami - wybierz model do edycji:",
-            choices=choices
-        ).ask()
+        res = create_picker_app(tabs, {0: options}, start_tab=0)
 
-        if selected_idx == -1 or selected_idx is None:
+        if res["action"] != "select" or res["value"] == "Exit":
             break
 
+        selected_opt = res["value"]
+        selected_idx = options.index(selected_opt)
         model = api_models[selected_idx]
-        action = questionary.select(
-            f"Edycja: {model['name']}",
-            choices=["Zmień nazwę modelu", "Zmień Base URL", "Usuń model", "Wr (Wróć)"]
-        ).ask()
+        
+        res2 = create_picker_app([f"Editing: {model['name']}"], {0: ["Rename model", "Change Base URL", "Delete model", "Back"]})
+        
+        if res2["action"] != "select" or res2["value"] == "Back":
+            continue
+            
+        action = res2["value"]
 
-        if action == "Zmień nazwę modelu":
-            new_name = questionary.text("Podaj nową nazwę modelu:", default=model["name"]).ask()
+        if action == "Rename model":
+            new_name = questionary.text("Enter new model name:", default=model["name"]).ask()
             if new_name:
                 api_models[selected_idx]["name"] = new_name
                 state["api_models"] = api_models
                 save_callback(state)
-                console.print("[green]Zaktualizowano nazwę modelu.[/green]")
-        elif action == "Zmień Base URL":
-            new_url = questionary.text("Podaj nowy Base URL:", default=model.get("base_url", "")).ask()
+                console.print("[green]Model name updated.[/green]")
+        elif action == "Change Base URL":
+            new_url = questionary.text("Enter new Base URL:", default=model.get("base_url", "")).ask()
             if new_url:
                 api_models[selected_idx]["base_url"] = new_url
                 state["api_models"] = api_models
                 save_callback(state)
-                console.print("[green]Zaktualizowano Base URL.[/green]")
-        elif action == "Usuń model":
-            confirm = questionary.confirm("Czy na pewno chcesz usunąć ten model?").ask()
+                console.print("[green]Base URL updated.[/green]")
+        elif action == "Delete model":
+            confirm = questionary.confirm("Are you sure you want to delete this model?").ask()
             if confirm:
                 api_models.pop(selected_idx)
                 state["api_models"] = api_models
                 save_callback(state)
-                console.print("[green]Usunięto model z konfiguracji.[/green]")
+                console.print("[green]Model deleted from configuration.[/green]")
 
 def run_api_keys_manager(state, save_callback):
     while True:
         api_keys = state.get("api_keys", {})
         if not api_keys:
-            console.print("[yellow]Brak zapisanych kluczy API.[/yellow]")
+            console.print("[yellow]No saved API keys found.[/yellow]")
             import time; time.sleep(1.5)
             return
 
-        choices = []
-        for k in api_keys.keys():
-            choices.append(questionary.Choice(f"Klucz dla: {k.upper()}", value=k))
-        choices.append(questionary.Choice("Wr (Wróć)", value=None))
+        tabs = ["API Keys Manager"]
+        keys_list = list(api_keys.keys())
+        options = [f"Key for: {k.upper()}" for k in keys_list]
+        options.append("Exit")
 
-        selected_provider = questionary.select(
-            "Zarządzanie kluczami API - wybierz dostawcę:",
-            choices=choices
-        ).ask()
+        res = create_picker_app(tabs, {0: options}, start_tab=0)
 
-        if not selected_provider:
+        if res["action"] != "select" or res["value"] == "Exit":
             break
+            
+        selected_opt = res["value"]
+        selected_idx = options.index(selected_opt)
+        selected_provider = keys_list[selected_idx]
 
-        action = questionary.select(
-            f"Klucz dla {selected_provider.upper()}:",
-            choices=["Zmień klucz", "Usuń klucz", "Wr (Wróć)"]
-        ).ask()
+        res2 = create_picker_app([f"Key for {selected_provider.upper()}"], {0: ["Change key", "Delete key", "Back"]})
 
-        if action == "Zmień klucz":
-            new_key = questionary.text("Podaj nowy klucz API:", default=api_keys[selected_provider]).ask()
+        if res2["action"] != "select" or res2["value"] == "Back":
+            continue
+            
+        action = res2["value"]
+
+        if action == "Change key":
+            new_key = questionary.text("Enter new API key:", default=api_keys[selected_provider]).ask()
             if new_key:
                 api_keys[selected_provider] = new_key
                 state["api_keys"] = api_keys
                 save_callback(state)
-                console.print(f"[green]Zaktualizowano klucz dla {selected_provider.upper()}.[/green]")
-        elif action == "Usuń klucz":
-            confirm = questionary.confirm(f"Czy na pewno usunąć klucz dla {selected_provider.upper()}?").ask()
+                console.print(f"[green]API key updated for {selected_provider.upper()}.[/green]")
+        elif action == "Delete key":
+            confirm = questionary.confirm(f"Are you sure you want to delete the key for {selected_provider.upper()}?").ask()
             if confirm:
                 del api_keys[selected_provider]
                 state["api_keys"] = api_keys
                 save_callback(state)
-                console.print(f"[green]Usunięto klucz dla {selected_provider.upper()}.[/green]")
+                console.print(f"[green]API key deleted for {selected_provider.upper()}.[/green]")
