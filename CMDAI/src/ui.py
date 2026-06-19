@@ -26,7 +26,7 @@ def print_header(model_name: str, cwd: str):
             
     header_text = Text()
     header_text.append(f"✻ CMDAI2  ·  {model_name}  ·  {engine_short}\n", style=ACCENT_COLOR)
-    header_text.append(f"cwd: {cwd}   /help · @plik · ⇧Tab", style=MUTED_COLOR)
+    header_text.append(f"cwd: {cwd}   /help · /review · @plik · ⇧Tab", style=MUTED_COLOR)
     
     panel = Panel(header_text, border_style=ACCENT_COLOR, padding=(0, 2), box=box.ROUNDED)
     console.print(panel)

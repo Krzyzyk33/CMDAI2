@@ -18,6 +18,7 @@ COMMANDS = {
     "/code": "przełącz w tryb kodowania (pyta o zgodę przed edycją)",
     "/plan": "switch to planning mode (only reads files and plans)",
     "/sessions": "manage contextual sessions and revert to an older state",
+    "/review": "toggle auto-reflection mode to double-check generated code",
     "/quit": "terminate the program and close the terminal window"
 }
 class CMDAICompleter(Completer):

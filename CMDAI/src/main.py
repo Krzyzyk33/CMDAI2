@@ -164,6 +164,10 @@ def main():
                 console.clear()
             elif user_input == "/compact":
                 context.trigger_compaction(model)
+            elif user_input == "/review":
+                agent.auto_review = not agent.auto_review
+                stan = "WŁĄCZONY" if agent.auto_review else "WYŁĄCZONY"
+                console.print(f"\n[magenta]🔍 Tryb Auto-Refleksji (samosprawdzania) został {stan}.[/magenta]")
             elif user_input.startswith("/sessions"):
                 while True:
                     sm = context.session_manager

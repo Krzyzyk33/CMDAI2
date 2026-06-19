@@ -10,6 +10,7 @@ class Agent:
         self.model = model
         self.context = context
         self.max_iterations = 25
+        self.auto_review = False
         
     def get_tool_desc(self) -> str:
         desc = ""
@@ -28,6 +29,7 @@ class Agent:
             
         self.context.add_user_message(user_msg)
         
+        self._has_reflected = False
         turn_start = time.time()
         total_tools = 0
         iteration = 0
