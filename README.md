@@ -17,7 +17,7 @@ Or simply use the `cmdai2` batch command if configured.
 
 ## Testing app:
 
-- [CMDAI2 Test App](https://github.com/Krzyzyk33/CMDAI2/blob/index.html)
+- [CMDAI2 Test App](https://krzyzyk33.github.io/CMDAI2/index.html)
 
 Select your preferred [API](API.md) provider, input your API key, and begin chatting.
 
