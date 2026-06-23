@@ -15,10 +15,6 @@ python main.py
 ```
 Or simply use the `cmdai2` batch command if configured.
 
-## Testing app create witch CMDAI2:
-
-- [CMDAI2 Test App](https://krzyzyk33.github.io/CMDAI2/index.html)
-
 ---
 
 Select your preferred [API](API.md) provider, input your API key, and begin chatting.
