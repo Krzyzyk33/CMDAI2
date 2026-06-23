@@ -4,11 +4,12 @@ from typing import List, Dict, Any, Generator, Tuple
 from openai import OpenAI
 import os
 class OpenAIAPIModel:
-    def __init__(self, model_name: str, api_key: str, base_url: str = "https://integrate.api.nvidia.com/v1"):
+    def __init__(self, model_name: str, api_key: str, base_url: str = "https://integrate.api.nvidia.com/v1", provider_id: str = None):
         self.model_name = model_name
         
         from src.providers import detect_provider_by_url, get_provider
-        provider_id = detect_provider_by_url(base_url)
+        if not provider_id:
+            provider_id = detect_provider_by_url(base_url)
         self.provider_module = get_provider(provider_id)
         
         if self.provider_module and hasattr(self.provider_module, "get_client"):
@@ -42,6 +43,25 @@ class OpenAIAPIModel:
                 kwargs["tools"] = openai_tools
             response = self.client.chat.completions.create(**kwargs)
             
+            if not kwargs.get("stream", True):
+                if hasattr(response, "choices") and response.choices:
+                    msg = response.choices[0].message
+                    if hasattr(msg, "content") and msg.content:
+                        yield msg.content, "", None
+                    if getattr(msg, "tool_calls", None):
+                        final_calls = []
+                        for tc in msg.tool_calls:
+                            final_calls.append({
+                                "id": getattr(tc, "id", "") or "",
+                                "type": "function",
+                                "function": {
+                                    "name": getattr(tc.function, "name", "") or "",
+                                    "arguments": getattr(tc.function, "arguments", "") or ""
+                                }
+                            })
+                        yield "", "", final_calls
+                return
+                
             for chunk in response:
                 if not chunk.choices:
                     continue

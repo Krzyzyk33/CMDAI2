@@ -33,6 +33,8 @@ class Agent:
         turn_start = time.time()
         total_tools = 0
         iteration = 0
+        modified_files = set()
+        self._fable_tested = False
         while iteration < self.max_iterations:
             iteration += 1
             tree = ThinkingTree(expanded=input_handler.thinking_expanded)
@@ -245,6 +247,33 @@ class Agent:
                     
                 if not full_content:
                     console.print("[gray50](Model did not generate a response)[/]")
+                
+                # Fable 5 Auto-Correction Phase
+                if modified_files and not self._fable_tested:
+                    self._fable_tested = True
+                    from .ui import MUTED_COLOR
+                    console.print("\n[magenta bold]● auto testing app[/magenta bold]")
+                    import subprocess
+                    test_results = ""
+                    for f in list(modified_files):
+                        if not os.path.exists(f): continue
+                        console.print(f"[{MUTED_COLOR}]  |_ Testing {f}...[/]")
+                        try:
+                            cmd = ["node", f] if f.endswith(".js") else ["python", f]
+                            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+                            if res.returncode != 0:
+                                test_results += f"File {f} failed with exit code {res.returncode}:\n{res.stderr or res.stdout}\n\n"
+                        except Exception as e:
+                            test_results += f"Could not run {f}: {e}\n\n"
+                            
+                    if test_results:
+                        console.print("[red bold]✗ Tests failed! Model will autonomously fix the code.[/red bold]")
+                        self.context.add_assistant_message(full_content)
+                        self.context.add_user_message(f"System Error (Fable 5 Auto-Test): I automatically tested the files you modified. Some of them crashed. You MUST fix these errors before finishing:\n\n{test_results}\n\nAnalyze the error, plan a fix, and use tools to correct it.")
+                        continue
+                    else:
+                        console.print("[green bold]✓ All edited files executed successfully![/green bold]")
+
                 self.context.add_assistant_message(full_content)
                 break
                 
@@ -259,9 +288,13 @@ class Agent:
                 self.consecutive_identical_calls = 0
                 self.last_tool_sig = sig
                 
-            if self.consecutive_identical_calls >= 2:
-                console.print("\n[red]⚠️ Auto-execution stopped: Loop detected (model repeated the same faulty tool 3 times).[/red]")
-                self.context.add_user_message("System: Stop using this tool, you are stuck in a loop. Analyze the error and tell me what is not working, or ask for guidance.")
+            if self.consecutive_identical_calls == 2:
+                console.print("\n[red]⚠️ Loop detected (model repeated the same faulty tool 3 times). Forcing change of approach...[/red]")
+                self.context.add_user_message("System Error: You are stuck in a loop. You repeated the EXACT SAME TOOL CALL 3 times and it failed. DO NOT USE THIS EXACT TOOL CALL AGAIN. You must change your approach, use a different tool, or fix the arguments.")
+                continue
+            elif self.consecutive_identical_calls >= 4:
+                console.print("\n[red]⚠️ Auto-execution stopped: Fatal loop detected.[/red]")
+                self.context.add_user_message("System: Fatal loop detected. Execution paused.")
                 break
                 
             # Handle tool calls
@@ -322,6 +355,11 @@ class Agent:
                     is_modifying = name in ["write_file", "edit_file", "delete_file", "create_file", "bash", "run_python"]
                     is_dangerous = name in ["bash", "run_python"]
                     
+                    if name in ["write_file", "edit_file", "create_file"]:
+                        p = args.get("path", "")
+                        if p.endswith(".py") or p.endswith(".js"):
+                            modified_files.add(os.path.abspath(p))
+
                     if name in ["write_file", "create_file"]:
                         print_code_panel(os.path.abspath(args.get("path", "file")), args.get("content", ""))
                     elif name == "edit_file":

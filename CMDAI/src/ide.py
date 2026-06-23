@@ -3,7 +3,7 @@ import json
 import asyncio
 import threading
 import websockets
-IDE_LOCK_FILE = os.path.expanduser("~/.cmdai2/ide.lock")
+IDE_LOCK_FILE = os.path.expanduser("~/.cmdai_code/ide.lock")
 class IDEServer:
     def __init__(self):
         self.port = 0

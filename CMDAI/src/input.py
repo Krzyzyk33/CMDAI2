@@ -40,7 +40,7 @@ class CMDAICompleter(Completer):
             except Exception:
                 pass
 class InputHandler:
-    def __init__(self, history_file="~/.cmdai2/history", thinking_idx=1):
+    def __init__(self, history_file="~/.cmdai_code/history", thinking_idx=1):
         self.history_file = os.path.expanduser(history_file)
         os.makedirs(os.path.dirname(self.history_file), exist_ok=True)
         
@@ -160,7 +160,7 @@ class InputHandler:
         import shutil
         import json, os
         engine_short = "cpp"
-        state_file = os.path.expanduser("~/.cmdai2/state.json")
+        state_file = os.path.expanduser("~/.cmdai_code/state.json")
         if os.path.exists(state_file):
             try:
                 with open(state_file, "r", encoding="utf-8") as f:

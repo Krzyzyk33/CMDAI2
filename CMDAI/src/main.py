@@ -7,7 +7,7 @@ from .agent import Agent
 from .ui import print_header, print_user_msg, console
 from .input import InputHandler
 from .ide import IDEServer
-STATE_FILE = os.path.expanduser("~/.cmdai2/state.json")
+STATE_FILE = os.path.expanduser("~/.cmdai_code/state.json")
 def load_state():
     if os.path.exists(STATE_FILE):
         try:
@@ -118,7 +118,7 @@ def main():
     if m_type == "api":
         from .api_model import OpenAIAPIModel
         model_path = m_val['name']
-        model = OpenAIAPIModel(model_name=m_val['name'], api_key=m_val['api_key'], base_url=m_val['base_url'])
+        model = OpenAIAPIModel(model_name=m_val['name'], api_key=m_val['api_key'], base_url=m_val['base_url'], provider_id=m_val.get('provider'))
     else:
         model_path = m_val
         model = LlamaModel(model_path)
@@ -343,6 +343,7 @@ def main():
                             
                         provider = sub_res["provider"]
                         api_key = console.input(f"\n[bold]Enter API key for {provider.upper()}: [/bold]")
+                        
                         if api_key:
                             if "api_keys" not in state:
                                 state["api_keys"] = {}
@@ -370,20 +371,30 @@ def main():
                             
                         provider = sub_res["provider"]
                         api_keys = state.get("api_keys", {})
-                        if provider not in api_keys:
+                        if provider not in api_keys and provider != "localllmapi":
                             console.print(f"\n[red]Missing API key for {provider.upper()}! Please select 'Add API key' first.[/red]")
                             import time; time.sleep(2)
                             continue
                             
                         model_name = console.input(f"\n[bold]Podaj nazwę modelu dla {provider.upper()}: [/bold]")
                         if model_name:
-                            from src.providers import get_provider
-                            provider_module = get_provider(provider)
-                            if provider_module:
-                                base_url = provider_module.BASE_URL
+                            if provider == "localllmapi":
+                                base_url = console.input(f"\n[bold]Enter Base URL for local API (e.g. http://127.0.0.1:1234/v1): [/bold]")
+                                if not base_url:
+                                    continue
+                                api_key_val = console.input(f"\n[bold]Enter API Key (press Enter for 'not-needed'): [/bold]")
+                                if not api_key_val:
+                                    api_key_val = "not-needed"
                             else:
-                                base_url = "https://api.openai.com/v1"
-                            new_api_model = {"name": model_name, "api_key": api_keys[provider], "base_url": base_url, "provider": provider}
+                                api_key_val = api_keys[provider]
+                                from src.providers import get_provider
+                                provider_module = get_provider(provider)
+                                if provider_module:
+                                    base_url = provider_module.BASE_URL
+                                else:
+                                    base_url = "https://api.openai.com/v1"
+                                    
+                            new_api_model = {"name": model_name, "api_key": api_key_val, "base_url": base_url, "provider": provider}
                             if "api_models" not in state:
                                 state["api_models"] = []
                             state["api_models"].append(new_api_model)
@@ -437,7 +448,7 @@ def main():
                         
                     from .api_model import OpenAIAPIModel
                     model_path = m_val['name']
-                    model = OpenAIAPIModel(model_name=m_val['name'], api_key=m_val['api_key'], base_url=m_val['base_url'])
+                    model = OpenAIAPIModel(model_name=m_val['name'], api_key=m_val['api_key'], base_url=m_val['base_url'], provider_id=m_val.get('provider'))
                     agent.model = model
                     os.system("cls" if os.name == "nt" else "clear")
                     print_header(os.path.basename(model_path), cwd)

@@ -1,6 +1,6 @@
 import os
 from typing import List, Dict
-SYSTEM_PROMPT = """You are CMDAI2, a highly capable AI coding assistant running locally in the terminal.
+SYSTEM_PROMPT = """You are CMDAI CODE, a highly capable AI coding assistant running locally in the terminal.
 You have access to tools to read, create, edit, search and delete files. You CAN run terminal commands and bash/powershell scripts using the bash tool, but ONLY under user supervision (the user must confirm execution).
 Read the *** THINKING LEVEL REQUIREMENTS *** at the end of this prompt carefully. IF your current thinking level requires a <think> block, you must output your internal thinking process between <think> and </think> tags.
 If you DO generate a <think> block, you MUST ALWAYS use a hierarchical tree structure with `|_ ` for indentation so the UI can parse your thinking.
@@ -31,84 +31,6 @@ HARD RULES FOR TOOLS & THINKING:
 16. CRITICAL: Your <think> block MUST ALWAYS use the tree structure (with `|_ `) exactly as shown in the example. This is mandatory for the UI to parse it into visual trees.
 26: AVAILABLE TOOLS:
 {tools_desc}
-UI FORMATTING RULES:
-You must include the following formatted blocks in your response text to inform the user about the operations you perform. Use ONLY real data. If an operation wasn't performed yet, do NOT generate its block.
-
-1. Read (reading a file)
-Format:
-● Read: <file_name>
-  ⎿ <N> lines
-When to generate: after reading a file (e.g. read_file).
-Data required: file name, number of lines in the read file.
-
-2. Edit (editing an existing file)
-Format:
-● Edit: <file_name>
-  ⎿ Changed <file_name> (+<N> / -<M>)
-     <line_number>   <unchanged_line_content>
-     <line_number> - <deleted_line_content>
-     <line_number> + <added_line_content>
-When to generate: when editing an existing file (e.g. edit_file). Must be preceded by reading.
-Data required: file name, number of added (+N) and deleted (-M) lines, content of changes (like diff).
-
-3. Write (new file)
-Format:
-● New file: <file_name>
-  ⎿ Created <file_name> (<N> lines)
-     1  <first_line>
-     2  <second_line>
-     3  <third_line>
-When to generate: when creating a new file. Do not overwrite existing files with this action!
-Data required: file name, total number of lines, preview of the first 3 lines.
-
-4. Bash (executing a command)
-Success format:
-● Command: <command>
-  ⎿ OK (exit 0)
-Error format:
-● Command: <command>
-  ⎿ ✗ <error_content> (exit <code_number>)
-When to generate: after executing a command in the terminal. Always provide the real exit code.
-If a command fails 3 times in a row, STOP and ask the user.
-
-5. Search / Grep / Glob (searching)
-Format with results:
-● Search: "<pattern>"
-  ⎿ <N> results
-     <file1>:<line>
-     <file2>:<line>
-Format without results:
-● Search: "<pattern>"
-  ⎿ no results
-When to generate: after using search tools. Provide up to 5 results.
-
-6. TodoWrite (task plan)
-Format:
-● Task Plan
-  ⎿ [x] <completed_task>
-    [ ] <task_to_do>
-When to generate: at the start of a task (min. 3 steps). Update the widget in subsequent responses.
-
-7. Permission Prompt (asking for consent)
-Format:
-● Command: <command>
-  Execute?
-  ❯ 1. Yes
-    2. Yes, don't ask again for "<command_type>"
-    3. No - tell what to do instead
-When to generate: BEFORE a potentially destructive command (rm, git push --force, install). Wait for user's choice.
-
-8. Task / Subagent dispatch
-Format:
-● Task: <short_description>
-  ⎿ Done (<N> actions • <K>k tokens • <T>s)
-When to generate: when delegating a larger batch of tasks.
-
-9. Status bar (turn status bar)
-While working it is automatically at the bottom of the screen: ✻ Working... (<T>s • esc = abort)
-At the end: ✻ Done (<T>s • <K>k tokens • <N> actions • esc = abort)
-
-REMEMBER: Always generate these blocks based on actual tool results, DO NOT INVENT them in advance.
 CRITICAL COMMUNICATION RULE: Always respond to the user in their own language (e.g., Polish) when writing conversational text!
 """
 class ContextManager:
@@ -133,7 +55,7 @@ class ContextManager:
     def save_history(self):
         import json
         self.session_manager.ensure_dir()
-        path = os.path.join(self.session_manager.cmdai2_dir, f"session_{self.session_manager.current_state.session_id}_history.json")
+        path = os.path.join(self.session_manager.cmdai_code_dir, f"session_{self.session_manager.current_state.session_id}_history.json")
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(self.messages, f, ensure_ascii=False, indent=2)
@@ -145,7 +67,7 @@ class ContextManager:
         if session_id:
             self.session_manager.load_state(session_id)
         
-        path = os.path.join(self.session_manager.cmdai2_dir, f"session_{self.session_manager.current_state.session_id}_history.json")
+        path = os.path.join(self.session_manager.cmdai_code_dir, f"session_{self.session_manager.current_state.session_id}_history.json")
         if os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8") as f:
@@ -160,19 +82,33 @@ class ContextManager:
         self.save_history()
 
     def _load_project_context(self):
-        cmdai_file = os.path.join(self.cwd, "CMDAI2.md")
+        cmdai_file = os.path.join(self.cwd, "CMDAI CODE.md")
         if os.path.exists(cmdai_file):
             with open(cmdai_file, "r", encoding="utf-8") as f:
                 content = f.read()
-                self.system_prompt += f"\n\nPROJECT CONTEXT (CMDAI2.md):\n{content}"
+                self.system_prompt += f"\n\nPROJECT CONTEXT (CMDAI CODE.md):\n{content}"
     def trigger_compaction(self, model):
         from .ui import console, MUTED_COLOR
         console.print(f"\n[{MUTED_COLOR}][Compacting context memory...][/]")
         compaction_prompt = "Summarize this working session precisely in this markdown format (without surrounding tags):\nGoal: <1-2 lines>\nDecisions:\n- <decision>\nFiles:\n- <file>: <change>\nPlan:\n[x] <completed step>\n[ ] <step to do>\nIssues:\n- <issue>\nConstraints:\n- <constraint>"
         messages = self.messages + [{"role": "user", "content": compaction_prompt}]
         
+        compaction_model_instance = model
+        try:
+            import json, os
+            state_file = os.path.expanduser("~/.cmdai_code/state.json")
+            with open(state_file, "r") as f:
+                state = json.load(f)
+            c_model = state.get("compaction_model")
+            if c_model:
+                from .api_model import APIModel
+                compaction_model_instance = APIModel(c_model)
+                console.print(f"[{MUTED_COLOR}][Using dedicated compaction model: {c_model}][/]")
+        except Exception:
+            pass
+            
         response_text = ""
-        for _, content, _ in model.stream_chat(messages, reasoning_budget=0):
+        for _, content, _ in compaction_model_instance.stream_chat(messages, reasoning_budget=0):
             if content:
                 response_text += content
                 

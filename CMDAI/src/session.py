@@ -104,31 +104,31 @@ class SessionState:
 class SessionManager:
     def __init__(self, cwd: str = "."):
         self.cwd = os.path.abspath(cwd)
-        self.cmdai2_dir = os.path.join(os.path.expanduser("~"), ".cmdai2")
+        self.cmdai_code_dir = os.path.join(os.path.expanduser("~"), ".cmdai_code")
         self.current_state = SessionState()
         
     def ensure_dir(self):
-        if not os.path.exists(self.cmdai2_dir):
-            os.makedirs(self.cmdai2_dir)
+        if not os.path.exists(self.cmdai_code_dir):
+            os.makedirs(self.cmdai_code_dir)
             
     def save_state(self):
         if not self.current_state.goal and not self.current_state.decisions and not self.current_state.files_touched:
             return # empty
         self.ensure_dir()
-        path = os.path.join(self.cmdai2_dir, f"session_{self.current_state.session_id}.md")
+        path = os.path.join(self.cmdai_code_dir, f"session_{self.current_state.session_id}.md")
         with open(path, "w", encoding="utf-8") as f:
             f.write(self.current_state.to_markdown())
             
         # Also symlink or copy to state.md for the active one
-        state_path = os.path.join(self.cmdai2_dir, "state.md")
+        state_path = os.path.join(self.cmdai_code_dir, "state.md")
         with open(state_path, "w", encoding="utf-8") as f:
             f.write(self.current_state.to_markdown())
 
     def load_state(self, session_id: str = "default"):
         self.ensure_dir()
-        path = os.path.join(self.cmdai2_dir, f"session_{session_id}.md")
+        path = os.path.join(self.cmdai_code_dir, f"session_{session_id}.md")
         if not os.path.exists(path) and session_id == "default":
-            path = os.path.join(self.cmdai2_dir, "state.md")
+            path = os.path.join(self.cmdai_code_dir, "state.md")
             
         if os.path.exists(path):
             try:
@@ -141,18 +141,18 @@ class SessionManager:
             
     def get_all_sessions(self) -> List[Dict[str, 'Any']]:
         import datetime
-        if not os.path.exists(self.cmdai2_dir):
+        if not os.path.exists(self.cmdai_code_dir):
             return []
         sessions_dict = {}
-        for f in os.listdir(self.cmdai2_dir):
+        for f in os.listdir(self.cmdai_code_dir):
             if f.startswith("session_") and f.endswith(".md"):
                 sid = f[8:-3]
-                path = os.path.join(self.cmdai2_dir, f)
+                path = os.path.join(self.cmdai_code_dir, f)
                 mtime = os.path.getmtime(path)
                 sessions_dict[sid] = mtime
             elif f.startswith("session_") and f.endswith("_history.json"):
                 sid = f[8:-13]
-                path = os.path.join(self.cmdai2_dir, f)
+                path = os.path.join(self.cmdai_code_dir, f)
                 mtime = os.path.getmtime(path)
                 if sid not in sessions_dict or sessions_dict[sid] < mtime:
                     sessions_dict[sid] = mtime
@@ -166,11 +166,11 @@ class SessionManager:
         return result
 
     def delete_session(self, session_id: str):
-        if not os.path.exists(self.cmdai2_dir):
+        if not os.path.exists(self.cmdai_code_dir):
             return
         
-        md_path = os.path.join(self.cmdai2_dir, f"session_{session_id}.md")
-        json_path = os.path.join(self.cmdai2_dir, f"session_{session_id}_history.json")
+        md_path = os.path.join(self.cmdai_code_dir, f"session_{session_id}.md")
+        json_path = os.path.join(self.cmdai_code_dir, f"session_{session_id}_history.json")
         
         try:
             if os.path.exists(md_path):
@@ -184,13 +184,13 @@ class SessionManager:
         if not self.current_state.session_id or self.current_state.session_id == new_id:
             return
             
-        old_md = os.path.join(self.cmdai2_dir, f"session_{self.current_state.session_id}.md")
-        old_json = os.path.join(self.cmdai2_dir, f"session_{self.current_state.session_id}_history.json")
+        old_md = os.path.join(self.cmdai_code_dir, f"session_{self.current_state.session_id}.md")
+        old_json = os.path.join(self.cmdai_code_dir, f"session_{self.current_state.session_id}_history.json")
         
         self.current_state.session_id = new_id
         
-        new_md = os.path.join(self.cmdai2_dir, f"session_{new_id}.md")
-        new_json = os.path.join(self.cmdai2_dir, f"session_{new_id}_history.json")
+        new_md = os.path.join(self.cmdai_code_dir, f"session_{new_id}.md")
+        new_json = os.path.join(self.cmdai_code_dir, f"session_{new_id}_history.json")
         
         try:
             if os.path.exists(old_md):
