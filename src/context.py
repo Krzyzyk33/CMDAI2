@@ -129,18 +129,21 @@ class ContextManager:
         from .ui import console, MUTED_COLOR
 
         state = self._load_app_state()
-        model_ref = state.get("compaction_model")
+        app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sys_dir = os.path.join(app_dir, "systemmodels")
+        model_ref = None
         
-        # Jeśli nie ma w configu, spróbuj znaleźć lokalny model systemowy
+        # Zawsze najwyższy priorytet ma lokalny folder systemmodels
+        if os.path.exists(sys_dir):
+            import glob
+            sys_models = glob.glob(os.path.join(sys_dir, "*.gguf"))
+            if sys_models:
+                needed_ctx = max(8192, self.get_token_count() + 4000)
+                model_ref = {"path": sys_models[0], "n_ctx": needed_ctx, "n_gpu_layers": 8}
+                
+        # Jeżeli folder jest pusty, sprawdź czy użytkownik wybrał coś w UI (state.json)
         if not model_ref:
-            app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            sys_dir = os.path.join(app_dir, "systemmodels")
-            if os.path.exists(sys_dir):
-                import glob
-                sys_models = glob.glob(os.path.join(sys_dir, "*.gguf"))
-                if sys_models:
-                    needed_ctx = max(8192, self.get_token_count() + 4000)
-                    model_ref = {"path": sys_models[0], "n_ctx": needed_ctx, "n_gpu_layers": 8}
+            model_ref = state.get("compaction_model")
         
         if not model_ref:
             return fallback_model, False
