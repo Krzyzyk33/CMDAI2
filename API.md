@@ -15,4 +15,5 @@
 7. GitHub Models 🟡
 8. Kilo Code 🟢
 9. Mistral 🟢
+10. LocalLLMAPI 🟢
    
