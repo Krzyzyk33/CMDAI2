@@ -135,9 +135,28 @@ class Agent:
                     if content:
                         full_content += content
                         if not tool_detected:
-                            raw = full_content.lstrip()
-                            if raw.startswith("{") or raw.startswith("`") or raw.startswith("n") or raw.startswith("o"):
-                                # Prawdopodobnie blok JSON lub tool call - wstrzymaj drukowanie
+                            json_start_idx = -1
+                            if "```json" in full_content:
+                                json_start_idx = full_content.find("```json")
+                            elif "<json>" in full_content:
+                                json_start_idx = full_content.find("<json>")
+                            else:
+                                raw = full_content.lstrip()
+                                if raw.startswith("{") or raw.startswith("`") or raw.startswith("n") or raw.startswith("o"):
+                                    json_start_idx = full_content.find(raw[0])
+                                    
+                            if json_start_idx != -1:
+                                # Wykryto początek JSON - drukujemy tylko to co przed nim, a resztę do spinnera
+                                chunk_to_print = full_content[printed_idx:json_start_idx]
+                                if chunk_to_print:
+                                    if tree.live.is_started:
+                                        tree.stop()
+                                        console.print()
+                                    import sys
+                                    console.print(chunk_to_print, end="")
+                                    sys.stdout.flush()
+                                    printed_idx = json_start_idx
+                                
                                 if tree.live.is_started:
                                     tree.stop()
                                     console.print()
@@ -146,8 +165,9 @@ class Agent:
                                     json_spinner = LiveToolStream()
                                     json_spinner.start()
                                 if json_spinner:
-                                    json_spinner.update(full_content)
+                                    json_spinner.update(full_content[json_start_idx:])
                             else:
+                                # Brak JSON - normalne drukowanie tekstu konwersacyjnego
                                 if json_spinner:
                                     json_spinner.stop()
                                     json_spinner = None
@@ -276,6 +296,18 @@ class Agent:
                         tool_calls = mock_calls
                         full_content = ""
 
+            # Deduplikacja narzędzi na wypadek gdyby model wygenerował kilka takich samych bloków JSON pod rząd
+            if tool_calls:
+                unique_calls = []
+                seen_sigs = set()
+                for tc in tool_calls:
+                    func = tc.get("function", {})
+                    sig = json.dumps({"name": func.get("name"), "args": func.get("arguments")}, sort_keys=True)
+                    if sig not in seen_sigs:
+                        seen_sigs.add(sig)
+                        unique_calls.append(tc)
+                tool_calls = unique_calls
+
             # Inicjalizacja licznika pętli
             self.self_correction_loops = getattr(self, "self_correction_loops", 0)
 
@@ -340,7 +372,7 @@ class Agent:
                 if modified_files and not self._fable_tested:
                     self._fable_tested = True
                     from .ui import MUTED_COLOR
-                    console.print("\n[magenta bold]● auto testing app[/magenta bold]")
+                    console.print("\n[white bold]● auto testing app[/white bold]")
                     import subprocess
                     test_results = ""
                     for f in list(modified_files):

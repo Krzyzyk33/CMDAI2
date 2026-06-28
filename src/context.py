@@ -158,12 +158,10 @@ class ContextManager:
                     base_ctx = int(model_ref.get("n_ctx", state.get("compaction_n_ctx", 8192)))
                     n_ctx = max(base_ctx, self.get_token_count() + 4000)
                     n_gpu_layers = int(model_ref.get("n_gpu_layers", state.get("compaction_n_gpu_layers", 8)))
-                    console.print(f"[{MUTED_COLOR}][Using local compaction model: {os.path.basename(local_path)}][/]")
                     return LlamaModel(local_path, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers), True
 
                 if model_ref.get("name") and model_ref.get("base_url") is not None:
                     from .api_model import OpenAIAPIModel
-                    console.print(f"[{MUTED_COLOR}][Using API compaction model: {model_ref.get('name')}][/]")
                     return OpenAIAPIModel(
                         model_name=model_ref["name"],
                         api_key=model_ref.get("api_key", ""),
@@ -178,13 +176,11 @@ class ContextManager:
                     base_ctx = int(state.get("compaction_n_ctx", 8192))
                     n_ctx = max(base_ctx, self.get_token_count() + 4000)
                     n_gpu_layers = int(state.get("compaction_n_gpu_layers", 8))
-                    console.print(f"[{MUTED_COLOR}][Using local compaction model: {os.path.basename(local_path)}][/]")
                     return LlamaModel(local_path, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers), True
 
                 for api_model in state.get("api_models", []):
                     if api_model.get("name") == model_ref:
                         from .api_model import OpenAIAPIModel
-                        console.print(f"[{MUTED_COLOR}][Using API compaction model: {model_ref}][/]")
                         return OpenAIAPIModel(
                             model_name=api_model["name"],
                             api_key=api_model.get("api_key", ""),
@@ -243,14 +239,17 @@ class ContextManager:
             "CRITICAL: Keep the summary extremely compact. Your output MUST NOT exceed 2000 tokens (approx. 8000 characters). "
             "Answer ONLY with the requested format in English."
         )
-        messages = [{"role": "system", "content": self.system_prompt}] + self.messages + [{"role": "user", "content": compaction_prompt}]
+        compaction_sys = "You are a memory-compression AI. You must read the history and output ONLY a summary in the exact requested format. You DO NOT use tools. Do NOT generate JSON tool calls under any circumstances."
+        messages = [{"role": "system", "content": compaction_sys}] + self.messages + [{"role": "user", "content": compaction_prompt}]
+
+        from .ui import console, MUTED_COLOR, ThinkingTree
+        tree = ThinkingTree(expanded=True, simulate=True, title="Loading system model", model_name="background task")
+        tree.start()
 
         compaction_model_instance, should_release = self._build_compaction_model(model)
         main_model_released = False
         if should_release and compaction_model_instance is not model:
             try:
-                from .ui import console, MUTED_COLOR
-                console.print(f"[{MUTED_COLOR}][Releasing main model before compaction.][/]")
                 if hasattr(model, "unload"):
                     model.unload()
                 if hasattr(model, "_llm") and getattr(model, "_llm", None) is not None:
@@ -265,15 +264,15 @@ class ContextManager:
         import os
         model_name_str = os.path.basename(model_name_str)
         
-        tree = ThinkingTree(expanded=True, simulate=False, title="Summarizing", model_name=model_name_str)
-        tree.start()
+        tree.title = "Summarizing"
+        tree.model_name = model_name_str
         
         max_retries = 3
         retry_count = 0
         current_messages = self.messages[:]
         
         while retry_count < max_retries:
-            messages = [{"role": "system", "content": self.system_prompt}] + current_messages + [{"role": "user", "content": compaction_prompt}]
+            messages = [{"role": "system", "content": compaction_sys}] + current_messages + [{"role": "user", "content": compaction_prompt}]
             response_text = ""
             current_line = ""
             try:
